@@ -1,2 +1,8 @@
 !patches
 !patches/*
+*.debhelper
+*.log
+*.substvars
+files
+build
+bubba3-kernel
