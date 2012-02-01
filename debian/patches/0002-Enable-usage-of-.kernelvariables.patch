@@ -3,14 +3,14 @@ Date: Wed, 17 Aug 2011 16:30:12 +0200
 Subject: Enable usage of .kernelvariables
 
 ---
- Makefile |   62 ++++++++++++++++++++++++++++++--------------------------------
- 1 files changed, 30 insertions(+), 32 deletions(-)
+ Makefile |   70 ++++++++++++++++++++++++++-----------------------------------
+ 1 files changed, 30 insertions(+), 40 deletions(-)
 
 diff --git a/Makefile b/Makefile
-index 1b2a736..a9cc695 100644
+index 2f684da..a662a5d 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -195,38 +195,6 @@ export KBUILD_BUILDHOST := $(SUBARCH)
+@@ -195,46 +195,6 @@ export KBUILD_BUILDHOST := $(SUBARCH)
  ARCH		?= $(SUBARCH)
  CROSS_COMPILE	?= $(CONFIG_CROSS_COMPILE:"%"=%)
  
@@ -39,6 +39,14 @@ index 1b2a736..a9cc695 100644
 -       SRCARCH := sh
 -endif
 -
+-# Additional ARCH settings for tile
+-ifeq ($(ARCH),tilepro)
+-       SRCARCH := tile
+-endif
+-ifeq ($(ARCH),tilegx)
+-       SRCARCH := tile
+-endif
+-
 -# Where to locate arch specific headers
 -hdr-arch  := $(SRCARCH)
 -
@@ -49,7 +57,7 @@ index 1b2a736..a9cc695 100644
  KCONFIG_CONFIG	?= .config
  export KCONFIG_CONFIG
  
-@@ -346,6 +314,36 @@ CFLAGS_KERNEL	=
+@@ -354,6 +314,36 @@ CFLAGS_KERNEL	=
  AFLAGS_KERNEL	=
  CFLAGS_GCOV	= -fprofile-arcs -ftest-coverage
  

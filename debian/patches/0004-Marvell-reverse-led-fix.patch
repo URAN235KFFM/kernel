@@ -14,7 +14,7 @@ Signed-off-by: Carl Fürstenberg <carl@excito.com>
  2 files changed, 20 insertions(+), 1 deletions(-)
 
 diff --git a/drivers/net/phy/Kconfig b/drivers/net/phy/Kconfig
-index 392a6c4..8988219 100644
+index a702443..18cd622 100644
 --- a/drivers/net/phy/Kconfig
 +++ b/drivers/net/phy/Kconfig
 @@ -19,7 +19,14 @@ config MARVELL_PHY

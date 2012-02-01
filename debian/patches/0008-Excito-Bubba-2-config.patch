@@ -2949,7 +2949,7 @@ index 0000000..eace38d
 +# CONFIG_PPC_CLOCK is not set
 +# CONFIG_VIRTUALIZATION is not set
 diff --git a/arch/powerpc/platforms/83xx/Kconfig b/arch/powerpc/platforms/83xx/Kconfig
-index 73f4135..65670be 100644
+index 670a033..55754c5 100644
 --- a/arch/powerpc/platforms/83xx/Kconfig
 +++ b/arch/powerpc/platforms/83xx/Kconfig
 @@ -24,6 +24,12 @@ config MPC831x_RDB
@@ -3553,7 +3553,7 @@ index 82a4345..570cd42 100644
  /*
   * Declaration for the various functions exported by the
 diff --git a/arch/powerpc/platforms/83xx/usb.c b/arch/powerpc/platforms/83xx/usb.c
-index 2c64164..96b27ec 100644
+index 1ad748b..eeb12a4 100644
 --- a/arch/powerpc/platforms/83xx/usb.c
 +++ b/arch/powerpc/platforms/83xx/usb.c
 @@ -184,7 +184,7 @@ int mpc831x_usb_cfg(void)
