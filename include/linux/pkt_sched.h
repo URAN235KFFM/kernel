@@ -30,7 +30,7 @@
  */
 
 struct tc_stats {
-	__u64	bytes;			/* NUmber of enqueues bytes */
+	__u64	bytes;			/* Number of enqueued bytes */
 	__u32	packets;		/* Number of enqueued packets	*/
 	__u32	drops;			/* Packets dropped because of lack of resources */
 	__u32	overlimits;		/* Number of throttle events when this
@@ -297,7 +297,7 @@ struct tc_htb_glob {
 	__u32 debug;		/* debug flags */
 
 	/* stats */
-	__u32 direct_pkts; /* count of non shapped packets */
+	__u32 direct_pkts; /* count of non shaped packets */
 };
 enum {
 	TCA_HTB_UNSPEC,
@@ -503,7 +503,7 @@ enum {
 };
 #define NETEM_LOSS_MAX (__NETEM_LOSS_MAX - 1)
 
-/* State transition probablities for 4 state model */
+/* State transition probabilities for 4 state model */
 struct tc_netem_gimodel {
 	__u32	p13;
 	__u32	p31;
@@ -587,5 +587,20 @@ struct tc_sfb_xstats {
 };
 
 #define SFB_MAX_PROB 0xFFFF
+
+/* QFQ */
+enum {
+	TCA_QFQ_UNSPEC,
+	TCA_QFQ_WEIGHT,
+	TCA_QFQ_LMAX,
+	__TCA_QFQ_MAX
+};
+
+#define TCA_QFQ_MAX	(__TCA_QFQ_MAX - 1)
+
+struct tc_qfq_stats {
+	__u32 weight;
+	__u32 lmax;
+};
 
 #endif

@@ -28,11 +28,9 @@
 #include "bat_sysfs.h"
 #include "originator.h"
 #include "hash.h"
+#include "bat_ogm.h"
 
 #include <linux/if_arp.h>
-
-/* protect update critical side of hardif_list - but not the content */
-static DEFINE_SPINLOCK(hardif_list_lock);
 
 
 static int batman_skb_recv(struct sk_buff *skb,
@@ -49,7 +47,7 @@ void hardif_free_rcu(struct rcu_head *rcu)
 	kfree(hard_iface);
 }
 
-struct hard_iface *hardif_get_by_netdev(struct net_device *net_dev)
+struct hard_iface *hardif_get_by_netdev(const struct net_device *net_dev)
 {
 	struct hard_iface *hard_iface;
 
@@ -67,7 +65,7 @@ out:
 	return hard_iface;
 }
 
-static int is_valid_iface(struct net_device *net_dev)
+static int is_valid_iface(const struct net_device *net_dev)
 {
 	if (net_dev->flags & IFF_LOOPBACK)
 		return 0;
@@ -89,7 +87,7 @@ static int is_valid_iface(struct net_device *net_dev)
 	return 1;
 }
 
-static struct hard_iface *hardif_get_active(struct net_device *soft_iface)
+static struct hard_iface *hardif_get_active(const struct net_device *soft_iface)
 {
 	struct hard_iface *hard_iface;
 
@@ -110,50 +108,50 @@ out:
 	return hard_iface;
 }
 
-static void update_primary_addr(struct bat_priv *bat_priv)
+static void primary_if_update_addr(struct bat_priv *bat_priv)
 {
 	struct vis_packet *vis_packet;
+	struct hard_iface *primary_if;
+
+	primary_if = primary_if_get_selected(bat_priv);
+	if (!primary_if)
+		goto out;
 
 	vis_packet = (struct vis_packet *)
 				bat_priv->my_vis_info->skb_packet->data;
-	memcpy(vis_packet->vis_orig,
-	       bat_priv->primary_if->net_dev->dev_addr, ETH_ALEN);
+	memcpy(vis_packet->vis_orig, primary_if->net_dev->dev_addr, ETH_ALEN);
 	memcpy(vis_packet->sender_orig,
-	       bat_priv->primary_if->net_dev->dev_addr, ETH_ALEN);
+	       primary_if->net_dev->dev_addr, ETH_ALEN);
+
+out:
+	if (primary_if)
+		hardif_free_ref(primary_if);
 }
 
-static void set_primary_if(struct bat_priv *bat_priv,
-			   struct hard_iface *hard_iface)
+static void primary_if_select(struct bat_priv *bat_priv,
+			      struct hard_iface *new_hard_iface)
 {
-	struct batman_packet *batman_packet;
-	struct hard_iface *old_if;
+	struct hard_iface *curr_hard_iface;
 
-	if (hard_iface && !atomic_inc_not_zero(&hard_iface->refcount))
-		hard_iface = NULL;
+	ASSERT_RTNL();
 
-	old_if = bat_priv->primary_if;
-	bat_priv->primary_if = hard_iface;
+	if (new_hard_iface && !atomic_inc_not_zero(&new_hard_iface->refcount))
+		new_hard_iface = NULL;
 
-	if (old_if)
-		hardif_free_ref(old_if);
+	curr_hard_iface = rcu_dereference_protected(bat_priv->primary_if, 1);
+	rcu_assign_pointer(bat_priv->primary_if, new_hard_iface);
 
-	if (!bat_priv->primary_if)
+	if (curr_hard_iface)
+		hardif_free_ref(curr_hard_iface);
+
+	if (!new_hard_iface)
 		return;
 
-	batman_packet = (struct batman_packet *)(hard_iface->packet_buff);
-	batman_packet->flags = PRIMARIES_FIRST_HOP;
-	batman_packet->ttl = TTL;
-
-	update_primary_addr(bat_priv);
-
-	/***
-	 * hacky trick to make sure that we send the HNA information via
-	 * our new primary interface
-	 */
-	atomic_set(&bat_priv->hna_local_changed, 1);
+	bat_ogm_init_primary(new_hard_iface);
+	primary_if_update_addr(bat_priv);
 }
 
-static bool hardif_is_iface_up(struct hard_iface *hard_iface)
+static bool hardif_is_iface_up(const struct hard_iface *hard_iface)
 {
 	if (hard_iface->net_dev->flags & IFF_UP)
 		return true;
@@ -161,17 +159,9 @@ static bool hardif_is_iface_up(struct hard_iface *hard_iface)
 	return false;
 }
 
-static void update_mac_addresses(struct hard_iface *hard_iface)
+static void check_known_mac_addr(const struct net_device *net_dev)
 {
-	memcpy(((struct batman_packet *)(hard_iface->packet_buff))->orig,
-	       hard_iface->net_dev->dev_addr, ETH_ALEN);
-	memcpy(((struct batman_packet *)(hard_iface->packet_buff))->prev_sender,
-	       hard_iface->net_dev->dev_addr, ETH_ALEN);
-}
-
-static void check_known_mac_addr(struct net_device *net_dev)
-{
-	struct hard_iface *hard_iface;
+	const struct hard_iface *hard_iface;
 
 	rcu_read_lock();
 	list_for_each_entry_rcu(hard_iface, &hardif_list, list) {
@@ -197,8 +187,8 @@ static void check_known_mac_addr(struct net_device *net_dev)
 
 int hardif_min_mtu(struct net_device *soft_iface)
 {
-	struct bat_priv *bat_priv = netdev_priv(soft_iface);
-	struct hard_iface *hard_iface;
+	const struct bat_priv *bat_priv = netdev_priv(soft_iface);
+	const struct hard_iface *hard_iface;
 	/* allow big frames if all devices are capable to do so
 	 * (have MTU > 1500 + BAT_HEADER_LEN) */
 	int min_mtu = ETH_DATA_LEN;
@@ -236,27 +226,32 @@ void update_min_mtu(struct net_device *soft_iface)
 static void hardif_activate_interface(struct hard_iface *hard_iface)
 {
 	struct bat_priv *bat_priv;
+	struct hard_iface *primary_if = NULL;
 
 	if (hard_iface->if_status != IF_INACTIVE)
-		return;
+		goto out;
 
 	bat_priv = netdev_priv(hard_iface->soft_iface);
 
-	update_mac_addresses(hard_iface);
+	bat_ogm_update_mac(hard_iface);
 	hard_iface->if_status = IF_TO_BE_ACTIVATED;
 
 	/**
 	 * the first active interface becomes our primary interface or
-	 * the next active interface after the old primay interface was removed
+	 * the next active interface after the old primary interface was removed
 	 */
-	if (!bat_priv->primary_if)
-		set_primary_if(bat_priv, hard_iface);
+	primary_if = primary_if_get_selected(bat_priv);
+	if (!primary_if)
+		primary_if_select(bat_priv, hard_iface);
 
 	bat_info(hard_iface->soft_iface, "Interface activated: %s\n",
 		 hard_iface->net_dev->name);
 
 	update_min_mtu(hard_iface->soft_iface);
-	return;
+
+out:
+	if (primary_if)
+		hardif_free_ref(primary_if);
 }
 
 static void hardif_deactivate_interface(struct hard_iface *hard_iface)
@@ -273,10 +268,10 @@ static void hardif_deactivate_interface(struct hard_iface *hard_iface)
 	update_min_mtu(hard_iface->soft_iface);
 }
 
-int hardif_enable_interface(struct hard_iface *hard_iface, char *iface_name)
+int hardif_enable_interface(struct hard_iface *hard_iface,
+			    const char *iface_name)
 {
 	struct bat_priv *bat_priv;
-	struct batman_packet *batman_packet;
 	struct net_device *soft_iface;
 	int ret;
 
@@ -311,8 +306,8 @@ int hardif_enable_interface(struct hard_iface *hard_iface, char *iface_name)
 
 	hard_iface->soft_iface = soft_iface;
 	bat_priv = netdev_priv(hard_iface->soft_iface);
-	hard_iface->packet_len = BAT_PACKET_LEN;
-	hard_iface->packet_buff = kmalloc(hard_iface->packet_len, GFP_ATOMIC);
+
+	bat_ogm_init(hard_iface);
 
 	if (!hard_iface->packet_buff) {
 		bat_err(hard_iface->soft_iface, "Can't add interface packet "
@@ -320,14 +315,6 @@ int hardif_enable_interface(struct hard_iface *hard_iface, char *iface_name)
 		ret = -ENOMEM;
 		goto err;
 	}
-
-	batman_packet = (struct batman_packet *)(hard_iface->packet_buff);
-	batman_packet->packet_type = BAT_PACKET;
-	batman_packet->version = COMPAT_VERSION;
-	batman_packet->flags = 0;
-	batman_packet->ttl = 2;
-	batman_packet->tq = TQ_MAX_VALUE;
-	batman_packet->num_hna = 0;
 
 	hard_iface->if_num = bat_priv->num_ifaces;
 	bat_priv->num_ifaces++;
@@ -373,7 +360,7 @@ int hardif_enable_interface(struct hard_iface *hard_iface, char *iface_name)
 			hard_iface->net_dev->name);
 
 	/* begin scheduling originator messages on that interface */
-	schedule_own_packet(hard_iface);
+	schedule_bat_ogm(hard_iface);
 
 out:
 	return 0;
@@ -386,12 +373,13 @@ err:
 void hardif_disable_interface(struct hard_iface *hard_iface)
 {
 	struct bat_priv *bat_priv = netdev_priv(hard_iface->soft_iface);
+	struct hard_iface *primary_if = NULL;
 
 	if (hard_iface->if_status == IF_ACTIVE)
 		hardif_deactivate_interface(hard_iface);
 
 	if (hard_iface->if_status != IF_INACTIVE)
-		return;
+		goto out;
 
 	bat_info(hard_iface->soft_iface, "Removing interface: %s\n",
 		 hard_iface->net_dev->name);
@@ -400,11 +388,12 @@ void hardif_disable_interface(struct hard_iface *hard_iface)
 	bat_priv->num_ifaces--;
 	orig_hash_del_if(hard_iface, bat_priv->num_ifaces);
 
-	if (hard_iface == bat_priv->primary_if) {
+	primary_if = primary_if_get_selected(bat_priv);
+	if (hard_iface == primary_if) {
 		struct hard_iface *new_if;
 
 		new_if = hardif_get_active(hard_iface->soft_iface);
-		set_primary_if(bat_priv, new_if);
+		primary_if_select(bat_priv, new_if);
 
 		if (new_if)
 			hardif_free_ref(new_if);
@@ -425,6 +414,10 @@ void hardif_disable_interface(struct hard_iface *hard_iface)
 
 	hard_iface->soft_iface = NULL;
 	hardif_free_ref(hard_iface);
+
+out:
+	if (primary_if)
+		hardif_free_ref(primary_if);
 }
 
 static struct hard_iface *hardif_add_interface(struct net_device *net_dev)
@@ -432,18 +425,17 @@ static struct hard_iface *hardif_add_interface(struct net_device *net_dev)
 	struct hard_iface *hard_iface;
 	int ret;
 
+	ASSERT_RTNL();
+
 	ret = is_valid_iface(net_dev);
 	if (ret != 1)
 		goto out;
 
 	dev_hold(net_dev);
 
-	hard_iface = kmalloc(sizeof(struct hard_iface), GFP_ATOMIC);
-	if (!hard_iface) {
-		pr_err("Can't add interface (%s): out of memory\n",
-		       net_dev->name);
+	hard_iface = kmalloc(sizeof(*hard_iface), GFP_ATOMIC);
+	if (!hard_iface)
 		goto release_dev;
-	}
 
 	ret = sysfs_add_hardif(&hard_iface->hardif_obj, net_dev);
 	if (ret)
@@ -458,10 +450,7 @@ static struct hard_iface *hardif_add_interface(struct net_device *net_dev)
 	atomic_set(&hard_iface->refcount, 2);
 
 	check_known_mac_addr(hard_iface->net_dev);
-
-	spin_lock(&hardif_list_lock);
 	list_add_tail_rcu(&hard_iface->list, &hardif_list);
-	spin_unlock(&hardif_list_lock);
 
 	return hard_iface;
 
@@ -475,6 +464,8 @@ out:
 
 static void hardif_remove_interface(struct hard_iface *hard_iface)
 {
+	ASSERT_RTNL();
+
 	/* first deactivate interface */
 	if (hard_iface->if_status != IF_NOT_IN_USE)
 		hardif_disable_interface(hard_iface);
@@ -490,20 +481,11 @@ static void hardif_remove_interface(struct hard_iface *hard_iface)
 void hardif_remove_interfaces(void)
 {
 	struct hard_iface *hard_iface, *hard_iface_tmp;
-	struct list_head if_queue;
 
-	INIT_LIST_HEAD(&if_queue);
-
-	spin_lock(&hardif_list_lock);
+	rtnl_lock();
 	list_for_each_entry_safe(hard_iface, hard_iface_tmp,
 				 &hardif_list, list) {
 		list_del_rcu(&hard_iface->list);
-		list_add_tail(&hard_iface->list, &if_queue);
-	}
-	spin_unlock(&hardif_list_lock);
-
-	rtnl_lock();
-	list_for_each_entry_safe(hard_iface, hard_iface_tmp, &if_queue, list) {
 		hardif_remove_interface(hard_iface);
 	}
 	rtnl_unlock();
@@ -512,8 +494,9 @@ void hardif_remove_interfaces(void)
 static int hard_if_event(struct notifier_block *this,
 			 unsigned long event, void *ptr)
 {
-	struct net_device *net_dev = (struct net_device *)ptr;
+	struct net_device *net_dev = ptr;
 	struct hard_iface *hard_iface = hardif_get_by_netdev(net_dev);
+	struct hard_iface *primary_if = NULL;
 	struct bat_priv *bat_priv;
 
 	if (!hard_iface && event == NETDEV_REGISTER)
@@ -531,9 +514,7 @@ static int hard_if_event(struct notifier_block *this,
 		hardif_deactivate_interface(hard_iface);
 		break;
 	case NETDEV_UNREGISTER:
-		spin_lock(&hardif_list_lock);
 		list_del_rcu(&hard_iface->list);
-		spin_unlock(&hardif_list_lock);
 
 		hardif_remove_interface(hard_iface);
 		break;
@@ -546,30 +527,36 @@ static int hard_if_event(struct notifier_block *this,
 			goto hardif_put;
 
 		check_known_mac_addr(hard_iface->net_dev);
-		update_mac_addresses(hard_iface);
+		bat_ogm_update_mac(hard_iface);
 
 		bat_priv = netdev_priv(hard_iface->soft_iface);
-		if (hard_iface == bat_priv->primary_if)
-			update_primary_addr(bat_priv);
+		primary_if = primary_if_get_selected(bat_priv);
+		if (!primary_if)
+			goto hardif_put;
+
+		if (hard_iface == primary_if)
+			primary_if_update_addr(bat_priv);
 		break;
 	default:
 		break;
-	};
+	}
 
 hardif_put:
 	hardif_free_ref(hard_iface);
 out:
+	if (primary_if)
+		hardif_free_ref(primary_if);
 	return NOTIFY_DONE;
 }
 
-/* receive a packet with the batman ethertype coming on a hard
+/* incoming packets with the batman ethertype received on any active hard
  * interface */
 static int batman_skb_recv(struct sk_buff *skb, struct net_device *dev,
 			   struct packet_type *ptype,
 			   struct net_device *orig_dev)
 {
 	struct bat_priv *bat_priv;
-	struct batman_packet *batman_packet;
+	struct batman_ogm_packet *batman_ogm_packet;
 	struct hard_iface *hard_iface;
 	int ret;
 
@@ -601,22 +588,22 @@ static int batman_skb_recv(struct sk_buff *skb, struct net_device *dev,
 	if (hard_iface->if_status != IF_ACTIVE)
 		goto err_free;
 
-	batman_packet = (struct batman_packet *)skb->data;
+	batman_ogm_packet = (struct batman_ogm_packet *)skb->data;
 
-	if (batman_packet->version != COMPAT_VERSION) {
+	if (batman_ogm_packet->version != COMPAT_VERSION) {
 		bat_dbg(DBG_BATMAN, bat_priv,
 			"Drop packet: incompatible batman version (%i)\n",
-			batman_packet->version);
+			batman_ogm_packet->version);
 		goto err_free;
 	}
 
 	/* all receive handlers return whether they received or reused
 	 * the supplied skb. if not, we have to free the skb. */
 
-	switch (batman_packet->packet_type) {
+	switch (batman_ogm_packet->packet_type) {
 		/* batman originator packet */
-	case BAT_PACKET:
-		ret = recv_bat_packet(skb, hard_iface);
+	case BAT_OGM:
+		ret = recv_bat_ogm_packet(skb, hard_iface);
 		break;
 
 		/* batman icmp packet */
@@ -643,6 +630,14 @@ static int batman_skb_recv(struct sk_buff *skb, struct net_device *dev,
 	case BAT_VIS:
 		ret = recv_vis_packet(skb, hard_iface);
 		break;
+		/* Translation table query (request or response) */
+	case BAT_TT_QUERY:
+		ret = recv_tt_query(skb, hard_iface);
+		break;
+		/* Roaming advertisement */
+	case BAT_ROAM_ADV:
+		ret = recv_roam_adv(skb, hard_iface);
+		break;
 	default:
 		ret = NET_RX_DROP;
 	}
@@ -660,6 +655,36 @@ err_free:
 	kfree_skb(skb);
 err_out:
 	return NET_RX_DROP;
+}
+
+/* This function returns true if the interface represented by ifindex is a
+ * 802.11 wireless device */
+bool is_wifi_iface(int ifindex)
+{
+	struct net_device *net_device = NULL;
+	bool ret = false;
+
+	if (ifindex == NULL_IFINDEX)
+		goto out;
+
+	net_device = dev_get_by_index(&init_net, ifindex);
+	if (!net_device)
+		goto out;
+
+#ifdef CONFIG_WIRELESS_EXT
+	/* pre-cfg80211 drivers have to implement WEXT, so it is possible to
+	 * check for wireless_handlers != NULL */
+	if (net_device->wireless_handlers)
+		ret = true;
+	else
+#endif
+		/* cfg80211 drivers have to set ieee80211_ptr */
+		if (net_device->ieee80211_ptr)
+			ret = true;
+out:
+	if (net_device)
+		dev_put(net_device);
+	return ret;
 }
 
 struct notifier_block hard_if_notifier = {

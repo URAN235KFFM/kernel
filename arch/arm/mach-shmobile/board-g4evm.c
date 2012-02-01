@@ -33,6 +33,7 @@
 #include <linux/mmc/host.h>
 #include <linux/mmc/sh_mobile_sdhi.h>
 #include <linux/gpio.h>
+#include <linux/dma-mapping.h>
 #include <mach/sh7377.h>
 #include <mach/common.h>
 #include <asm/mach-types.h>
@@ -205,7 +206,7 @@ static struct resource sdhi0_resources[] = {
 	[0] = {
 		.name	= "SDHI0",
 		.start  = 0xe6d50000,
-		.end    = 0xe6d50nff,
+		.end    = 0xe6d500ff,
 		.flags  = IORESOURCE_MEM,
 	},
 	[1] = {
@@ -274,6 +275,8 @@ static struct map_desc g4evm_io_desc[] __initdata = {
 static void __init g4evm_map_io(void)
 {
 	iotable_init(g4evm_io_desc, ARRAY_SIZE(g4evm_io_desc));
+	/* DMA memory at 0xf6000000 - 0xffdfffff */
+	init_consistent_dma_size(158 << 20);
 
 	/* setup early devices and console here as well */
 	sh7377_add_early_devices();

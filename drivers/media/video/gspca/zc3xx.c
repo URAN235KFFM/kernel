@@ -19,6 +19,8 @@
  * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #define MODULE_NAME "zc3xx"
 
 #include <linux/input.h>
@@ -3065,15 +3067,10 @@ static const struct usb_action mc501cb_InitialScale[] = {	/* 320x240 */
 	{0xaa, 0x55, 0x0010}, /* 00,55,10,aa */
 	{0xa0, 0xf0, 0x0199}, /* 01,99,F0,cc */
 	{0xa0, 0x80, 0x019a}, /* 01,9A,80,cc */
-	{0xaa, 0x03, 0x0003}, /* 00,03,03,aa */
-	{0xaa, 0x10, 0x00fc}, /* 00,10,fc,aa */
-	{0xaa, 0x36, 0x001d}, /* 00,36,1D,aa */
-	{0xaa, 0x37, 0x004c}, /* 00,37,4C,aa */
-	{0xaa, 0x3b, 0x001d}, /* 00,3B,1D,aa */
 	{}
 };
 
-static const struct usb_action mc501cb_50HZScale[] = {
+static const struct usb_action mc501cb_50HZ[] = {
 	{0xaa, 0x03, 0x0003}, /* 00,03,03,aa */
 	{0xaa, 0x10, 0x00fc}, /* 00,10,fc,aa */
 	{0xaa, 0x36, 0x001d}, /* 00,36,1D,aa */
@@ -3082,15 +3079,10 @@ static const struct usb_action mc501cb_50HZScale[] = {
 	{0xaa, 0x3c, 0x004c}, /* 00,3C,4C,aa */
 	{0xaa, 0x3d, 0x001d}, /* 00,3D,1D,aa */
 	{0xaa, 0x3e, 0x004c}, /* 00,3E,4C,aa */
-	{0xaa, 0x03, 0x0003}, /* 00,03,03,aa */
-	{0xaa, 0x10, 0x00fc}, /* 00,10,fc,aa */
-	{0xaa, 0x36, 0x003a}, /* 00,36,3A,aa */
-	{0xaa, 0x37, 0x0098}, /* 00,37,98,aa */
-	{0xaa, 0x3b, 0x003a}, /* 00,3B,3A,aa */
 	{}
 };
 
-static const struct usb_action mc501cb_50HZ[] = {
+static const struct usb_action mc501cb_50HZScale[] = {
 	{0xaa, 0x03, 0x0003}, /* 00,03,03,aa */
 	{0xaa, 0x10, 0x00fc}, /* 00,10,fc,aa */
 	{0xaa, 0x36, 0x003a}, /* 00,36,3A,aa */
@@ -3099,15 +3091,10 @@ static const struct usb_action mc501cb_50HZ[] = {
 	{0xaa, 0x3c, 0x0098}, /* 00,3C,98,aa */
 	{0xaa, 0x3d, 0x003a}, /* 00,3D,3A,aa */
 	{0xaa, 0x3e, 0x0098}, /* 00,3E,98,aa */
-	{0xaa, 0x03, 0x0003}, /* 00,03,03,aa */
-	{0xaa, 0x10, 0x00fc}, /* 00,10,fc,aa */
-	{0xaa, 0x36, 0x0018}, /* 00,36,18,aa */
-	{0xaa, 0x37, 0x006a}, /* 00,37,6A,aa */
-	{0xaa, 0x3d, 0x0018}, /* 00,3D,18,aa */
 	{}
 };
 
-static const struct usb_action mc501cb_60HZScale[] = {
+static const struct usb_action mc501cb_60HZ[] = {
 	{0xaa, 0x03, 0x0003}, /* 00,03,03,aa */
 	{0xaa, 0x10, 0x00fc}, /* 00,10,fc,aa */
 	{0xaa, 0x36, 0x0018}, /* 00,36,18,aa */
@@ -3116,15 +3103,10 @@ static const struct usb_action mc501cb_60HZScale[] = {
 	{0xaa, 0x3e, 0x006a}, /* 00,3E,6A,aa */
 	{0xaa, 0x3b, 0x0018}, /* 00,3B,18,aa */
 	{0xaa, 0x3c, 0x006a}, /* 00,3C,6A,aa */
-	{0xaa, 0x03, 0x0003}, /* 00,03,03,aa */
-	{0xaa, 0x10, 0x00fc}, /* 00,10,fc,aa */
-	{0xaa, 0x36, 0x0030}, /* 00,36,30,aa */
-	{0xaa, 0x37, 0x00d4}, /* 00,37,D4,aa */
-	{0xaa, 0x3d, 0x0030}, /* 00,3D,30,aa */
 	{}
 };
 
-static const struct usb_action mc501cb_60HZ[] = {
+static const struct usb_action mc501cb_60HZScale[] = {
 	{0xaa, 0x03, 0x0003}, /* 00,03,03,aa */
 	{0xaa, 0x10, 0x00fc}, /* 00,10,fc,aa */
 	{0xaa, 0x36, 0x0030}, /* 00,36,30,aa */
@@ -3133,15 +3115,10 @@ static const struct usb_action mc501cb_60HZ[] = {
 	{0xaa, 0x3e, 0x00d4}, /* 00,3E,D4,aa */
 	{0xaa, 0x3b, 0x0030}, /* 00,3B,30,aa */
 	{0xaa, 0x3c, 0x00d4}, /* 00,3C,D4,aa */
-	{0xaa, 0x03, 0x0003}, /* 00,03,03,aa */
-	{0xaa, 0x10, 0x00fc}, /* 00,10,fc,aa */
-	{0xaa, 0x36, 0x0018}, /* 00,36,18,aa */
-	{0xaa, 0x37, 0x006a}, /* 00,37,6A,aa */
-	{0xaa, 0x3d, 0x0018}, /* 00,3D,18,aa */
 	{}
 };
 
-static const struct usb_action mc501cb_NoFlikerScale[] = {
+static const struct usb_action mc501cb_NoFliker[] = {
 	{0xaa, 0x03, 0x0003}, /* 00,03,03,aa */
 	{0xaa, 0x10, 0x00fc}, /* 00,10,fc,aa */
 	{0xaa, 0x36, 0x0018}, /* 00,36,18,aa */
@@ -3150,15 +3127,10 @@ static const struct usb_action mc501cb_NoFlikerScale[] = {
 	{0xaa, 0x3e, 0x006a}, /* 00,3E,6A,aa */
 	{0xaa, 0x3b, 0x0018}, /* 00,3B,18,aa */
 	{0xaa, 0x3c, 0x006a}, /* 00,3C,6A,aa */
-	{0xaa, 0x03, 0x0003}, /* 00,03,03,aa */
-	{0xaa, 0x10, 0x00fc}, /* 00,10,fc,aa */
-	{0xaa, 0x36, 0x0030}, /* 00,36,30,aa */
-	{0xaa, 0x37, 0x00d4}, /* 00,37,D4,aa */
-	{0xaa, 0x3d, 0x0030}, /* 00,3D,30,aa */
 	{}
 };
 
-static const struct usb_action mc501cb_NoFliker[] = {
+static const struct usb_action mc501cb_NoFlikerScale[] = {
 	{0xaa, 0x03, 0x0003}, /* 00,03,03,aa */
 	{0xaa, 0x10, 0x00fc}, /* 00,10,fc,aa */
 	{0xaa, 0x36, 0x0030}, /* 00,36,30,aa */
@@ -5696,7 +5668,7 @@ static u8 reg_r_i(struct gspca_dev *gspca_dev,
 			index, gspca_dev->usb_buf, 1,
 			500);
 	if (ret < 0) {
-		err("reg_r_i err %d", ret);
+		pr_err("reg_r_i err %d\n", ret);
 		gspca_dev->usb_err = ret;
 		return 0;
 	}
@@ -5728,7 +5700,7 @@ static void reg_w_i(struct gspca_dev *gspca_dev,
 			value, index, NULL, 0,
 			500);
 	if (ret < 0) {
-		err("reg_w_i err %d", ret);
+		pr_err("reg_w_i err %d\n", ret);
 		gspca_dev->usb_err = ret;
 	}
 }
@@ -5754,7 +5726,7 @@ static u16 i2c_read(struct gspca_dev *gspca_dev,
 	msleep(20);
 	retbyte = reg_r_i(gspca_dev, 0x0091);		/* read status */
 	if (retbyte != 0x00)
-		err("i2c_r status error %02x", retbyte);
+		pr_err("i2c_r status error %02x\n", retbyte);
 	retval = reg_r_i(gspca_dev, 0x0095);		/* read Lowbyte */
 	retval |= reg_r_i(gspca_dev, 0x0096) << 8;	/* read Hightbyte */
 	PDEBUG(D_USBI, "i2c r [%02x] -> %04x (%02x)",
@@ -5778,7 +5750,7 @@ static u8 i2c_write(struct gspca_dev *gspca_dev,
 	msleep(1);
 	retbyte = reg_r_i(gspca_dev, 0x0091);		/* read status */
 	if (retbyte != 0x00)
-		err("i2c_w status error %02x", retbyte);
+		pr_err("i2c_w status error %02x\n", retbyte);
 	PDEBUG(D_USBO, "i2c w [%02x] = %02x%02x (%02x)",
 			reg, valH, valL, retbyte);
 	return retbyte;
@@ -6296,7 +6268,6 @@ static int vga_3wr_probe(struct gspca_dev *gspca_dev)
 {
 	struct sd *sd = (struct sd *) gspca_dev;
 	int i;
-	u8 retbyte;
 	u16 retword;
 
 /*fixme: lack of 8b=b3 (11,12)-> 10, 8b=e0 (14,15,16)-> 12 found in gspcav1*/
@@ -6389,8 +6360,12 @@ static int vga_3wr_probe(struct gspca_dev *gspca_dev)
 	retword |= i2c_read(gspca_dev, 0x01);		/* ID 1 */
 	PDEBUG(D_PROBE, "probe 3wr vga 2 0x%04x", retword);
 	if (retword == 0x2030) {
+#ifdef GSPCA_DEBUG
+		u8 retbyte;
+
 		retbyte = i2c_read(gspca_dev, 0x02);	/* revision number */
 		PDEBUG(D_PROBE, "sensor PO2030 rev 0x%02x", retbyte);
+#endif
 		send_unknown(gspca_dev, SENSOR_PO2030);
 		return retword;
 	}
@@ -6524,7 +6499,7 @@ static int sd_init(struct gspca_dev *gspca_dev)
 				PDEBUG(D_PROBE, "Sensor GC0303");
 				break;
 			default:
-				warn("Unknown sensor - set to TAS5130C");
+				pr_warn("Unknown sensor - set to TAS5130C\n");
 				sd->sensor = SENSOR_TAS5130C;
 			}
 			break;
@@ -6630,7 +6605,7 @@ static int sd_init(struct gspca_dev *gspca_dev)
 			sd->sensor = SENSOR_OV7620;	/* same sensor (?) */
 			break;
 		default:
-			err("Unknown sensor %04x", sensor);
+			pr_err("Unknown sensor %04x\n", sensor);
 			return -EINVAL;
 		}
 	}
@@ -6997,6 +6972,7 @@ static const struct sd_desc sd_desc = {
 };
 
 static const struct usb_device_id device_table[] = {
+	{USB_DEVICE(0x03f0, 0x1b07)},
 	{USB_DEVICE(0x041e, 0x041e)},
 	{USB_DEVICE(0x041e, 0x4017)},
 	{USB_DEVICE(0x041e, 0x401c), .driver_info = SENSOR_PAS106},

@@ -24,7 +24,6 @@
  * linux 2.4 support David McCullough <davidm@snapgear.com>
  */
 
-#include <linux/sys.h>
 #include <linux/linkage.h>
 #include <asm/errno.h>
 #include <asm/setup.h>
@@ -44,7 +43,7 @@
 .globl sys_vfork
 
 ENTRY(buserr)
-	SAVE_ALL
+	SAVE_ALL_INT
 	moveq	#-1,%d0
 	movel	%d0,%sp@(PT_OFF_ORIG_D0)
 	movel	%sp,%sp@- 		/* stack frame pointer argument */
@@ -53,7 +52,7 @@ ENTRY(buserr)
 	jra	ret_from_exception
 
 ENTRY(trap)
-	SAVE_ALL
+	SAVE_ALL_INT
 	moveq	#-1,%d0
 	movel	%d0,%sp@(PT_OFF_ORIG_D0)
 	movel	%sp,%sp@- 		/* stack frame pointer argument */
@@ -65,7 +64,7 @@ ENTRY(trap)
 
 .globl dbginterrupt
 ENTRY(dbginterrupt)
-	SAVE_ALL
+	SAVE_ALL_INT
 	moveq	#-1,%d0
 	movel	%d0,%sp@(PT_OFF_ORIG_D0)
 	movel	%sp,%sp@- 		/* stack frame pointer argument */

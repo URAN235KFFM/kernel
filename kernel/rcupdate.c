@@ -37,14 +37,19 @@
 #include <linux/smp.h>
 #include <linux/interrupt.h>
 #include <linux/sched.h>
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 #include <linux/bitops.h>
 #include <linux/percpu.h>
 #include <linux/notifier.h>
 #include <linux/cpu.h>
 #include <linux/mutex.h>
-#include <linux/module.h>
+#include <linux/export.h>
 #include <linux/hardirq.h>
+
+#define CREATE_TRACE_POINTS
+#include <trace/events/rcu.h>
+
+#include "rcu.h"
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
 static struct lock_class_key rcu_lock_key;
@@ -94,17 +99,36 @@ EXPORT_SYMBOL_GPL(rcu_read_lock_bh_held);
 
 #endif /* #ifdef CONFIG_DEBUG_LOCK_ALLOC */
 
+struct rcu_synchronize {
+	struct rcu_head head;
+	struct completion completion;
+};
+
 /*
  * Awaken the corresponding synchronize_rcu() instance now that a
  * grace period has elapsed.
  */
-void wakeme_after_rcu(struct rcu_head  *head)
+static void wakeme_after_rcu(struct rcu_head  *head)
 {
 	struct rcu_synchronize *rcu;
 
 	rcu = container_of(head, struct rcu_synchronize, head);
 	complete(&rcu->completion);
 }
+
+void wait_rcu_gp(call_rcu_func_t crf)
+{
+	struct rcu_synchronize rcu;
+
+	init_rcu_head_on_stack(&rcu.head);
+	init_completion(&rcu.completion);
+	/* Will wake me after RCU finished. */
+	crf(&rcu.head, wakeme_after_rcu);
+	/* Wait for it. */
+	wait_for_completion(&rcu.completion);
+	destroy_rcu_head_on_stack(&rcu.head);
+}
+EXPORT_SYMBOL_GPL(wait_rcu_gp);
 
 #ifdef CONFIG_PROVE_RCU
 /*
@@ -142,10 +166,17 @@ static int rcuhead_fixup_init(void *addr, enum debug_obj_state state)
 		 * Ensure that queued callbacks are all executed.
 		 * If we detect that we are nested in a RCU read-side critical
 		 * section, we should simply fail, otherwise we would deadlock.
+		 * In !PREEMPT configurations, there is no way to tell if we are
+		 * in a RCU read-side critical section or not, so we never
+		 * attempt any fixup and just print a warning.
 		 */
+#ifndef CONFIG_PREEMPT
+		WARN_ON_ONCE(1);
+		return 0;
+#endif
 		if (rcu_preempt_depth() != 0 || preempt_count() != 0 ||
 		    irqs_disabled()) {
-			WARN_ON(1);
+			WARN_ON_ONCE(1);
 			return 0;
 		}
 		rcu_barrier();
@@ -184,10 +215,17 @@ static int rcuhead_fixup_activate(void *addr, enum debug_obj_state state)
 		 * Ensure that queued callbacks are all executed.
 		 * If we detect that we are nested in a RCU read-side critical
 		 * section, we should simply fail, otherwise we would deadlock.
+		 * In !PREEMPT configurations, there is no way to tell if we are
+		 * in a RCU read-side critical section or not, so we never
+		 * attempt any fixup and just print a warning.
 		 */
+#ifndef CONFIG_PREEMPT
+		WARN_ON_ONCE(1);
+		return 0;
+#endif
 		if (rcu_preempt_depth() != 0 || preempt_count() != 0 ||
 		    irqs_disabled()) {
-			WARN_ON(1);
+			WARN_ON_ONCE(1);
 			return 0;
 		}
 		rcu_barrier();
@@ -214,15 +252,17 @@ static int rcuhead_fixup_free(void *addr, enum debug_obj_state state)
 		 * Ensure that queued callbacks are all executed.
 		 * If we detect that we are nested in a RCU read-side critical
 		 * section, we should simply fail, otherwise we would deadlock.
-		 * Note that the machinery to reliably determine whether
-		 * or not we are in an RCU read-side critical section
-		 * exists only in the preemptible RCU implementations
-		 * (TINY_PREEMPT_RCU and TREE_PREEMPT_RCU), which is why
-		 * DEBUG_OBJECTS_RCU_HEAD is disallowed if !PREEMPT.
+		 * In !PREEMPT configurations, there is no way to tell if we are
+		 * in a RCU read-side critical section or not, so we never
+		 * attempt any fixup and just print a warning.
 		 */
+#ifndef CONFIG_PREEMPT
+		WARN_ON_ONCE(1);
+		return 0;
+#endif
 		if (rcu_preempt_depth() != 0 || preempt_count() != 0 ||
 		    irqs_disabled()) {
-			WARN_ON(1);
+			WARN_ON_ONCE(1);
 			return 0;
 		}
 		rcu_barrier();

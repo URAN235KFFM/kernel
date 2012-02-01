@@ -27,7 +27,6 @@
 #include <linux/io.h>
 #include <linux/module.h>
 #include <linux/platform_device.h>
-#include <linux/mfd/core.h>
 #include <linux/slab.h>
 
 #include <linux/timb_dma.h>
@@ -685,7 +684,7 @@ static irqreturn_t td_irq(int irq, void *devid)
 
 static int __devinit td_probe(struct platform_device *pdev)
 {
-	struct timb_dma_platform_data *pdata = mfd_get_data(pdev);
+	struct timb_dma_platform_data *pdata = pdev->dev.platform_data;
 	struct timb_dma *td;
 	struct resource *iomem;
 	int irq;
@@ -754,7 +753,7 @@ static int __devinit td_probe(struct platform_device *pdev)
 
 	INIT_LIST_HEAD(&td->dma.channels);
 
-	for (i = 0; i < pdata->nr_channels; i++, td->dma.chancnt++) {
+	for (i = 0; i < pdata->nr_channels; i++) {
 		struct timb_dma_chan *td_chan = &td->channels[i];
 		struct timb_dma_platform_data_channel *pchan =
 			pdata->channels + i;
@@ -763,12 +762,11 @@ static int __devinit td_probe(struct platform_device *pdev)
 		if ((i % 2) == pchan->rx) {
 			dev_err(&pdev->dev, "Wrong channel configuration\n");
 			err = -EINVAL;
-			goto err_tasklet_kill;
+			goto err_free_irq;
 		}
 
 		td_chan->chan.device = &td->dma;
 		td_chan->chan.cookie = 1;
-		td_chan->chan.chan_id = i;
 		spin_lock_init(&td_chan->lock);
 		INIT_LIST_HEAD(&td_chan->active_list);
 		INIT_LIST_HEAD(&td_chan->queue);

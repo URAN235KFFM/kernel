@@ -34,8 +34,9 @@
 #include <plat/board.h>
 #include <plat/common.h>
 #include <plat/usb.h>
-#include <plat/display.h>
-#include <plat/panel-generic-dpi.h>
+#include <video/omapdss.h>
+#include <video/omap-panel-generic-dpi.h>
+#include <video/omap-panel-dvi.h>
 
 #include "mux.h"
 #include "control.h"
@@ -174,19 +175,14 @@ static void __init am3517_evm_rtc_init(void)
 	int r;
 
 	omap_mux_init_gpio(GPIO_RTCS35390A_IRQ, OMAP_PIN_INPUT_PULLUP);
-	r = gpio_request(GPIO_RTCS35390A_IRQ, "rtcs35390a-irq");
+
+	r = gpio_request_one(GPIO_RTCS35390A_IRQ, GPIOF_IN, "rtcs35390a-irq");
 	if (r < 0) {
 		printk(KERN_WARNING "failed to request GPIO#%d\n",
 				GPIO_RTCS35390A_IRQ);
 		return;
 	}
-	r = gpio_direction_input(GPIO_RTCS35390A_IRQ);
-	if (r < 0) {
-		printk(KERN_WARNING "GPIO#%d cannot be configured as input\n",
-				GPIO_RTCS35390A_IRQ);
-		gpio_free(GPIO_RTCS35390A_IRQ);
-		return;
-	}
+
 	am3517evm_i2c1_boardinfo[0].irq = gpio_to_irq(GPIO_RTCS35390A_IRQ);
 }
 
@@ -242,6 +238,15 @@ static int dvi_enabled;
 
 #if defined(CONFIG_PANEL_SHARP_LQ043T1DG01) || \
 		defined(CONFIG_PANEL_SHARP_LQ043T1DG01_MODULE)
+static struct gpio am3517_evm_dss_gpios[] __initdata = {
+	/* GPIO 182 = LCD Backlight Power */
+	{ LCD_PANEL_BKLIGHT_PWR, GPIOF_OUT_INIT_HIGH, "lcd_backlight_pwr" },
+	/* GPIO 181 = LCD Panel PWM */
+	{ LCD_PANEL_PWM,	 GPIOF_OUT_INIT_HIGH, "lcd bl enable"	  },
+	/* GPIO 176 = LCD Panel Power enable pin */
+	{ LCD_PANEL_PWR,	 GPIOF_OUT_INIT_HIGH, "dvi enable"	  },
+};
+
 static void __init am3517_evm_display_init(void)
 {
 	int r;
@@ -249,41 +254,15 @@ static void __init am3517_evm_display_init(void)
 	omap_mux_init_gpio(LCD_PANEL_PWR, OMAP_PIN_INPUT_PULLUP);
 	omap_mux_init_gpio(LCD_PANEL_BKLIGHT_PWR, OMAP_PIN_INPUT_PULLDOWN);
 	omap_mux_init_gpio(LCD_PANEL_PWM, OMAP_PIN_INPUT_PULLDOWN);
-	/*
-	 * Enable GPIO 182 = LCD Backlight Power
-	 */
-	r = gpio_request(LCD_PANEL_BKLIGHT_PWR, "lcd_backlight_pwr");
+
+	r = gpio_request_array(am3517_evm_dss_gpios,
+			       ARRAY_SIZE(am3517_evm_dss_gpios));
 	if (r) {
-		printk(KERN_ERR "failed to get lcd_backlight_pwr\n");
+		printk(KERN_ERR "failed to get DSS panel control GPIOs\n");
 		return;
 	}
-	gpio_direction_output(LCD_PANEL_BKLIGHT_PWR, 1);
-	/*
-	 * Enable GPIO 181 = LCD Panel PWM
-	 */
-	r = gpio_request(LCD_PANEL_PWM, "lcd_pwm");
-	if (r) {
-		printk(KERN_ERR "failed to get lcd_pwm\n");
-		goto err_1;
-	}
-	gpio_direction_output(LCD_PANEL_PWM, 1);
-	/*
-	 * Enable GPIO 176 = LCD Panel Power enable pin
-	 */
-	r = gpio_request(LCD_PANEL_PWR, "lcd_panel_pwr");
-	if (r) {
-		printk(KERN_ERR "failed to get lcd_panel_pwr\n");
-		goto err_2;
-	}
-	gpio_direction_output(LCD_PANEL_PWR, 1);
 
 	printk(KERN_INFO "Display initialized successfully\n");
-	return;
-
-err_2:
-	gpio_free(LCD_PANEL_PWM);
-err_1:
-	gpio_free(LCD_PANEL_BKLIGHT_PWR);
 }
 #else
 static void __init am3517_evm_display_init(void) {}
@@ -355,8 +334,7 @@ static void am3517_evm_panel_disable_dvi(struct omap_dss_device *dssdev)
 	dvi_enabled = 0;
 }
 
-static struct panel_generic_dpi_data dvi_panel = {
-	.name			= "generic",
+static struct panel_dvi_platform_data dvi_panel = {
 	.platform_enable	= am3517_evm_panel_enable_dvi,
 	.platform_disable	= am3517_evm_panel_disable_dvi,
 };
@@ -364,7 +342,7 @@ static struct panel_generic_dpi_data dvi_panel = {
 static struct omap_dss_device am3517_evm_dvi_device = {
 	.type			= OMAP_DISPLAY_TYPE_DPI,
 	.name			= "dvi",
-	.driver_name		= "generic_dpi_panel",
+	.driver_name		= "dvi",
 	.data			= &dvi_panel,
 	.phy.dpi.data_lines	= 24,
 };
@@ -384,11 +362,6 @@ static struct omap_dss_board_info am3517_evm_dss_data = {
 /*
  * Board initialization
  */
-static void __init am3517_evm_init_early(void)
-{
-	omap2_init_common_infrastructure();
-	omap2_init_common_devices(NULL, NULL);
-}
 
 static struct omap_musb_board_data musb_board_data = {
 	.interface_type         = MUSB_INTERFACE_ULPI,
@@ -396,7 +369,7 @@ static struct omap_musb_board_data musb_board_data = {
 	.power                  = 500,
 	.set_phy_power		= am35x_musb_phy_power,
 	.clear_irq		= am35x_musb_clear_irq,
-	.set_mode		= am35x_musb_set_mode,
+	.set_mode		= am35x_set_mode,
 	.reset			= am35x_musb_reset,
 };
 
@@ -491,6 +464,7 @@ static void __init am3517_evm_init(void)
 	am3517_evm_i2c_init();
 	omap_display_init(&am3517_evm_dss_data);
 	omap_serial_init();
+	omap_sdrc_init(NULL, NULL);
 
 	/* Configure GPIO for EHCI port */
 	omap_mux_init_gpio(57, OMAP_PIN_OUTPUT);
@@ -512,11 +486,11 @@ static void __init am3517_evm_init(void)
 }
 
 MACHINE_START(OMAP3517EVM, "OMAP3517/AM3517 EVM")
-	.boot_params	= 0x80000100,
+	.atag_offset	= 0x100,
 	.reserve	= omap_reserve,
 	.map_io		= omap3_map_io,
-	.init_early	= am3517_evm_init_early,
-	.init_irq	= omap_init_irq,
+	.init_early	= am35xx_init_early,
+	.init_irq	= omap3_init_irq,
 	.init_machine	= am3517_evm_init,
-	.timer		= &omap_timer,
+	.timer		= &omap3_timer,
 MACHINE_END

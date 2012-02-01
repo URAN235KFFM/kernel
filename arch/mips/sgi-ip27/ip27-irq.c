@@ -147,8 +147,10 @@ static void ip27_do_irq_mask0(void)
 #ifdef CONFIG_SMP
 	if (pend0 & (1UL << CPU_RESCHED_A_IRQ)) {
 		LOCAL_HUB_CLR_INTR(CPU_RESCHED_A_IRQ);
+		scheduler_ipi();
 	} else if (pend0 & (1UL << CPU_RESCHED_B_IRQ)) {
 		LOCAL_HUB_CLR_INTR(CPU_RESCHED_B_IRQ);
+		scheduler_ipi();
 	} else if (pend0 & (1UL << CPU_CALL_A_IRQ)) {
 		LOCAL_HUB_CLR_INTR(CPU_CALL_A_IRQ);
 		smp_call_function_interrupt();
@@ -335,12 +337,12 @@ static struct irq_chip bridge_irq_type = {
 	.irq_unmask	= enable_bridge_irq,
 };
 
-void __devinit register_bridge_irq(unsigned int irq)
+void register_bridge_irq(unsigned int irq)
 {
 	irq_set_chip_and_handler(irq, &bridge_irq_type, handle_level_irq);
 }
 
-int __devinit request_bridge_irq(struct bridge_controller *bc)
+int request_bridge_irq(struct bridge_controller *bc)
 {
 	int irq = allocate_irqno();
 	int swlevel, cpu;

@@ -625,7 +625,7 @@ static struct radeon_asic r600_asic = {
 	.fence_ring_emit = &r600_fence_ring_emit,
 	.cs_parse = &r600_cs_parse,
 	.copy_blit = &r600_copy_blit,
-	.copy_dma = &r600_copy_blit,
+	.copy_dma = NULL,
 	.copy = &r600_copy_blit,
 	.get_engine_clock = &radeon_atom_get_engine_clock,
 	.set_engine_clock = &radeon_atom_set_engine_clock,
@@ -672,7 +672,7 @@ static struct radeon_asic rs780_asic = {
 	.fence_ring_emit = &r600_fence_ring_emit,
 	.cs_parse = &r600_cs_parse,
 	.copy_blit = &r600_copy_blit,
-	.copy_dma = &r600_copy_blit,
+	.copy_dma = NULL,
 	.copy = &r600_copy_blit,
 	.get_engine_clock = &radeon_atom_get_engine_clock,
 	.set_engine_clock = &radeon_atom_set_engine_clock,
@@ -719,7 +719,7 @@ static struct radeon_asic rv770_asic = {
 	.fence_ring_emit = &r600_fence_ring_emit,
 	.cs_parse = &r600_cs_parse,
 	.copy_blit = &r600_copy_blit,
-	.copy_dma = &r600_copy_blit,
+	.copy_dma = NULL,
 	.copy = &r600_copy_blit,
 	.get_engine_clock = &radeon_atom_get_engine_clock,
 	.set_engine_clock = &radeon_atom_set_engine_clock,
@@ -765,9 +765,9 @@ static struct radeon_asic evergreen_asic = {
 	.get_vblank_counter = &evergreen_get_vblank_counter,
 	.fence_ring_emit = &r600_fence_ring_emit,
 	.cs_parse = &evergreen_cs_parse,
-	.copy_blit = &evergreen_copy_blit,
-	.copy_dma = &evergreen_copy_blit,
-	.copy = &evergreen_copy_blit,
+	.copy_blit = &r600_copy_blit,
+	.copy_dma = NULL,
+	.copy = &r600_copy_blit,
 	.get_engine_clock = &radeon_atom_get_engine_clock,
 	.set_engine_clock = &radeon_atom_set_engine_clock,
 	.get_memory_clock = &radeon_atom_get_memory_clock,
@@ -812,9 +812,9 @@ static struct radeon_asic sumo_asic = {
 	.get_vblank_counter = &evergreen_get_vblank_counter,
 	.fence_ring_emit = &r600_fence_ring_emit,
 	.cs_parse = &evergreen_cs_parse,
-	.copy_blit = &evergreen_copy_blit,
-	.copy_dma = &evergreen_copy_blit,
-	.copy = &evergreen_copy_blit,
+	.copy_blit = &r600_copy_blit,
+	.copy_dma = NULL,
+	.copy = &r600_copy_blit,
 	.get_engine_clock = &radeon_atom_get_engine_clock,
 	.set_engine_clock = &radeon_atom_set_engine_clock,
 	.get_memory_clock = NULL,
@@ -834,7 +834,7 @@ static struct radeon_asic sumo_asic = {
 	.pm_misc = &evergreen_pm_misc,
 	.pm_prepare = &evergreen_pm_prepare,
 	.pm_finish = &evergreen_pm_finish,
-	.pm_init_profile = &rs780_pm_init_profile,
+	.pm_init_profile = &sumo_pm_init_profile,
 	.pm_get_dynpm_state = &r600_pm_get_dynpm_state,
 	.pre_page_flip = &evergreen_pre_page_flip,
 	.page_flip = &evergreen_page_flip,
@@ -859,9 +859,9 @@ static struct radeon_asic btc_asic = {
 	.get_vblank_counter = &evergreen_get_vblank_counter,
 	.fence_ring_emit = &r600_fence_ring_emit,
 	.cs_parse = &evergreen_cs_parse,
-	.copy_blit = &evergreen_copy_blit,
-	.copy_dma = &evergreen_copy_blit,
-	.copy = &evergreen_copy_blit,
+	.copy_blit = &r600_copy_blit,
+	.copy_dma = NULL,
+	.copy = &r600_copy_blit,
 	.get_engine_clock = &radeon_atom_get_engine_clock,
 	.set_engine_clock = &radeon_atom_set_engine_clock,
 	.get_memory_clock = &radeon_atom_get_memory_clock,
@@ -906,9 +906,9 @@ static struct radeon_asic cayman_asic = {
 	.get_vblank_counter = &evergreen_get_vblank_counter,
 	.fence_ring_emit = &r600_fence_ring_emit,
 	.cs_parse = &evergreen_cs_parse,
-	.copy_blit = NULL,
+	.copy_blit = &r600_copy_blit,
 	.copy_dma = NULL,
-	.copy = NULL,
+	.copy = &r600_copy_blit,
 	.get_engine_clock = &radeon_atom_get_engine_clock,
 	.set_engine_clock = &radeon_atom_set_engine_clock,
 	.get_memory_clock = &radeon_atom_get_memory_clock,
@@ -938,6 +938,13 @@ static struct radeon_asic cayman_asic = {
 int radeon_asic_init(struct radeon_device *rdev)
 {
 	radeon_register_accessor_init(rdev);
+
+	/* set the number of crtcs */
+	if (rdev->flags & RADEON_SINGLE_CRTC)
+		rdev->num_crtc = 1;
+	else
+		rdev->num_crtc = 2;
+
 	switch (rdev->family) {
 	case CHIP_R100:
 	case CHIP_RV100:
@@ -1017,18 +1024,32 @@ int radeon_asic_init(struct radeon_device *rdev)
 	case CHIP_JUNIPER:
 	case CHIP_CYPRESS:
 	case CHIP_HEMLOCK:
+		/* set num crtcs */
+		if (rdev->family == CHIP_CEDAR)
+			rdev->num_crtc = 4;
+		else
+			rdev->num_crtc = 6;
 		rdev->asic = &evergreen_asic;
 		break;
 	case CHIP_PALM:
+	case CHIP_SUMO:
+	case CHIP_SUMO2:
 		rdev->asic = &sumo_asic;
 		break;
 	case CHIP_BARTS:
 	case CHIP_TURKS:
 	case CHIP_CAICOS:
+		/* set num crtcs */
+		if (rdev->family == CHIP_CAICOS)
+			rdev->num_crtc = 4;
+		else
+			rdev->num_crtc = 6;
 		rdev->asic = &btc_asic;
 		break;
 	case CHIP_CAYMAN:
 		rdev->asic = &cayman_asic;
+		/* set num crtcs */
+		rdev->num_crtc = 6;
 		break;
 	default:
 		/* FIXME: not supported yet */
@@ -1038,18 +1059,6 @@ int radeon_asic_init(struct radeon_device *rdev)
 	if (rdev->flags & RADEON_IS_IGP) {
 		rdev->asic->get_memory_clock = NULL;
 		rdev->asic->set_memory_clock = NULL;
-	}
-
-	/* set the number of crtcs */
-	if (rdev->flags & RADEON_SINGLE_CRTC)
-		rdev->num_crtc = 1;
-	else {
-		if (ASIC_IS_DCE41(rdev))
-			rdev->num_crtc = 2;
-		else if (ASIC_IS_DCE4(rdev))
-			rdev->num_crtc = 6;
-		else
-			rdev->num_crtc = 2;
 	}
 
 	return 0;

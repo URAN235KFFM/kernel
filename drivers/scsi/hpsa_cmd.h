@@ -101,6 +101,7 @@
 #define CFGTBL_ChangeReq        0x00000001l
 #define CFGTBL_AccCmds          0x00000001l
 #define DOORBELL_CTLR_RESET	0x00000004l
+#define DOORBELL_CTLR_RESET2	0x00000020l
 
 #define CFGTBL_Trans_Simple     0x00000002l
 #define CFGTBL_Trans_Performant 0x00000004l
@@ -122,8 +123,11 @@ union u64bit {
 
 /* FIXME this is a per controller value (barf!) */
 #define HPSA_MAX_TARGETS_PER_CTLR 16
-#define HPSA_MAX_LUN 256
+#define HPSA_MAX_LUN 1024
 #define HPSA_MAX_PHYS_LUN 1024
+#define MAX_MSA2XXX_ENCLOSURES 32
+#define HPSA_MAX_DEVICES (HPSA_MAX_PHYS_LUN + HPSA_MAX_LUN + \
+	MAX_MSA2XXX_ENCLOSURES + 1) /* + 1 is for the controller itself */
 
 /* SCSI-3 Commands */
 #pragma pack(1)
@@ -256,14 +260,6 @@ struct ErrorInfo {
 #define CMD_IOCTL_PEND  0x01
 #define CMD_SCSI	0x03
 
-/* This structure needs to be divisible by 32 for new
- * indexing method and performant mode.
- */
-#define PAD32 32
-#define PAD64DIFF 0
-#define USEEXTRA ((sizeof(void *) - 4)/4)
-#define PADSIZE (PAD32 + PAD64DIFF * USEEXTRA)
-
 #define DIRECT_LOOKUP_SHIFT 5
 #define DIRECT_LOOKUP_BIT 0x10
 #define DIRECT_LOOKUP_MASK (~((1 << DIRECT_LOOKUP_SHIFT) - 1))
@@ -345,6 +341,8 @@ struct CfgTable {
 	u8		reserved[0x78 - 0x58];
 	u32		misc_fw_support; /* offset 0x78 */
 #define			MISC_FW_DOORBELL_RESET (0x02)
+#define			MISC_FW_DOORBELL_RESET2 (0x010)
+	u8		driver_version[32];
 };
 
 #define NUM_BLOCKFETCH_ENTRIES 8

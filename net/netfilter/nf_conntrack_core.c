@@ -661,7 +661,6 @@ __nf_conntrack_alloc(struct net *net, u16 zone,
 	 */
 	ct = kmem_cache_alloc(net->ct.nf_conntrack_cachep, gfp);
 	if (ct == NULL) {
-		pr_debug("nf_conntrack_alloc: Can't alloc conntrack.\n");
 		atomic_dec(&net->ct.count);
 		return ERR_PTR(-ENOMEM);
 	}
@@ -749,10 +748,8 @@ init_conntrack(struct net *net, struct nf_conn *tmpl,
 
 	ct = __nf_conntrack_alloc(net, zone, tuple, &repl_tuple, GFP_ATOMIC,
 				  hash);
-	if (IS_ERR(ct)) {
-		pr_debug("Can't allocate conntrack.\n");
+	if (IS_ERR(ct))
 		return (struct nf_conntrack_tuple_hash *)ct;
-	}
 
 	if (!l4proto->new(ct, skb, dataoff)) {
 		nf_conntrack_free(ct);
@@ -779,7 +776,7 @@ init_conntrack(struct net *net, struct nf_conn *tmpl,
 		if (exp->helper) {
 			help = nf_ct_helper_ext_add(ct, GFP_ATOMIC);
 			if (help)
-				rcu_assign_pointer(help->helper, exp->helper);
+				RCU_INIT_POINTER(help->helper, exp->helper);
 		}
 
 #ifdef CONFIG_NF_CONNTRACK_MARK
@@ -850,7 +847,7 @@ resolve_normal_ct(struct net *net, struct nf_conn *tmpl,
 
 	/* It exists; we have (non-exclusive) reference. */
 	if (NF_CT_DIRECTION(h) == IP_CT_DIR_REPLY) {
-		*ctinfo = IP_CT_ESTABLISHED + IP_CT_IS_REPLY;
+		*ctinfo = IP_CT_ESTABLISHED_REPLY;
 		/* Please set reply bit if this packet OK */
 		*set_reply = 1;
 	} else {
@@ -922,6 +919,9 @@ nf_conntrack_in(struct net *net, u_int8_t pf, unsigned int hooknum,
 			ret = -ret;
 			goto out;
 		}
+		/* ICMP[v6] protocol trackers may assign one conntrack. */
+		if (skb->nfct)
+			goto out;
 	}
 
 	ct = resolve_normal_ct(net, tmpl, skb, dataoff, pf, protonum,
@@ -1143,7 +1143,7 @@ static void nf_conntrack_attach(struct sk_buff *nskb, struct sk_buff *skb)
 	/* This ICMP is in reverse direction to the packet which caused it */
 	ct = nf_ct_get(skb, &ctinfo);
 	if (CTINFO2DIR(ctinfo) == IP_CT_DIR_ORIGINAL)
-		ctinfo = IP_CT_RELATED + IP_CT_IS_REPLY;
+		ctinfo = IP_CT_RELATED_REPLY;
 	else
 		ctinfo = IP_CT_RELATED;
 
@@ -1314,7 +1314,7 @@ static void nf_conntrack_cleanup_net(struct net *net)
 void nf_conntrack_cleanup(struct net *net)
 {
 	if (net_eq(net, &init_net))
-		rcu_assign_pointer(ip_ct_attach, NULL);
+		RCU_INIT_POINTER(ip_ct_attach, NULL);
 
 	/* This makes sure all current packets have passed through
 	   netfilter framework.  Roll on, two-stage module
@@ -1324,7 +1324,7 @@ void nf_conntrack_cleanup(struct net *net)
 	nf_conntrack_cleanup_net(net);
 
 	if (net_eq(net, &init_net)) {
-		rcu_assign_pointer(nf_ct_destroy, NULL);
+		RCU_INIT_POINTER(nf_ct_destroy, NULL);
 		nf_conntrack_cleanup_init_net();
 	}
 }
@@ -1573,11 +1573,11 @@ int nf_conntrack_init(struct net *net)
 
 	if (net_eq(net, &init_net)) {
 		/* For use by REJECT target */
-		rcu_assign_pointer(ip_ct_attach, nf_conntrack_attach);
-		rcu_assign_pointer(nf_ct_destroy, destroy_conntrack);
+		RCU_INIT_POINTER(ip_ct_attach, nf_conntrack_attach);
+		RCU_INIT_POINTER(nf_ct_destroy, destroy_conntrack);
 
 		/* Howto get NAT offsets */
-		rcu_assign_pointer(nf_ct_nat_offset, NULL);
+		RCU_INIT_POINTER(nf_ct_nat_offset, NULL);
 	}
 	return 0;
 
