@@ -24,13 +24,12 @@
 #include <linux/stat.h>
 #include <linux/slab.h>
 
-#include <asm/atomic.h>
+#include <linux/atomic.h>
 #include <asm/uaccess.h>
 
 static DEFINE_MUTEX(mem_sysfs_mutex);
 
 #define MEMORY_CLASS_NAME	"memory"
-#define MIN_MEMORY_BLOCK_SIZE	(1 << SECTION_SIZE_BITS)
 
 static int sections_per_block;
 
@@ -48,7 +47,8 @@ static const char *memory_uevent_name(struct kset *kset, struct kobject *kobj)
 	return MEMORY_CLASS_NAME;
 }
 
-static int memory_uevent(struct kset *kset, struct kobject *obj, struct kobj_uevent_env *env)
+static int memory_uevent(struct kset *kset, struct kobject *obj,
+			struct kobj_uevent_env *env)
 {
 	int retval = 0;
 
@@ -224,45 +224,68 @@ int memory_isolate_notify(unsigned long val, void *v)
 }
 
 /*
+ * The probe routines leave the pages reserved, just as the bootmem code does.
+ * Make sure they're still that way.
+ */
+static bool pages_correctly_reserved(unsigned long start_pfn,
+					unsigned long nr_pages)
+{
+	int i, j;
+	struct page *page;
+	unsigned long pfn = start_pfn;
+
+	/*
+	 * memmap between sections is not contiguous except with
+	 * SPARSEMEM_VMEMMAP. We lookup the page once per section
+	 * and assume memmap is contiguous within each section
+	 */
+	for (i = 0; i < sections_per_block; i++, pfn += PAGES_PER_SECTION) {
+		if (WARN_ON_ONCE(!pfn_valid(pfn)))
+			return false;
+		page = pfn_to_page(pfn);
+
+		for (j = 0; j < PAGES_PER_SECTION; j++) {
+			if (PageReserved(page + j))
+				continue;
+
+			printk(KERN_WARNING "section number %ld page number %d "
+				"not reserved, was it already online?\n",
+				pfn_to_section_nr(pfn), j);
+
+			return false;
+		}
+	}
+
+	return true;
+}
+
+/*
  * MEMORY_HOTPLUG depends on SPARSEMEM in mm/Kconfig, so it is
  * OK to have direct references to sparsemem variables in here.
  */
 static int
-memory_section_action(unsigned long phys_index, unsigned long action)
+memory_block_action(unsigned long phys_index, unsigned long action)
 {
-	int i;
 	unsigned long start_pfn, start_paddr;
+	unsigned long nr_pages = PAGES_PER_SECTION * sections_per_block;
 	struct page *first_page;
 	int ret;
 
 	first_page = pfn_to_page(phys_index << PFN_SECTION_SHIFT);
 
-	/*
-	 * The probe routines leave the pages reserved, just
-	 * as the bootmem code does.  Make sure they're still
-	 * that way.
-	 */
-	if (action == MEM_ONLINE) {
-		for (i = 0; i < PAGES_PER_SECTION; i++) {
-			if (PageReserved(first_page+i))
-				continue;
-
-			printk(KERN_WARNING "section number %ld page number %d "
-				"not reserved, was it already online?\n",
-				phys_index, i);
-			return -EBUSY;
-		}
-	}
-
 	switch (action) {
 		case MEM_ONLINE:
 			start_pfn = page_to_pfn(first_page);
-			ret = online_pages(start_pfn, PAGES_PER_SECTION);
+
+			if (!pages_correctly_reserved(start_pfn, nr_pages))
+				return -EBUSY;
+
+			ret = online_pages(start_pfn, nr_pages);
 			break;
 		case MEM_OFFLINE:
 			start_paddr = page_to_pfn(first_page) << PAGE_SHIFT;
 			ret = remove_memory(start_paddr,
-					    PAGES_PER_SECTION << PAGE_SHIFT);
+					    nr_pages << PAGE_SHIFT);
 			break;
 		default:
 			WARN(1, KERN_WARNING "%s(%ld, %ld) unknown action: "
@@ -276,7 +299,7 @@ memory_section_action(unsigned long phys_index, unsigned long action)
 static int memory_block_change_state(struct memory_block *mem,
 		unsigned long to_state, unsigned long from_state_req)
 {
-	int i, ret = 0;
+	int ret = 0;
 
 	mutex_lock(&mem->state_mutex);
 
@@ -288,20 +311,11 @@ static int memory_block_change_state(struct memory_block *mem,
 	if (to_state == MEM_OFFLINE)
 		mem->state = MEM_GOING_OFFLINE;
 
-	for (i = 0; i < sections_per_block; i++) {
-		ret = memory_section_action(mem->start_section_nr + i,
-					    to_state);
-		if (ret)
-			break;
-	}
+	ret = memory_block_action(mem->start_section_nr, to_state);
 
-	if (ret) {
-		for (i = 0; i < sections_per_block; i++)
-			memory_section_action(mem->start_section_nr + i,
-					      from_state_req);
-
+	if (ret)
 		mem->state = from_state_req;
-	} else
+	else
 		mem->state = to_state;
 
 out:
@@ -388,23 +402,26 @@ memory_probe_store(struct class *class, struct class_attribute *attr,
 	u64 phys_addr;
 	int nid;
 	int i, ret;
+	unsigned long pages_per_block = PAGES_PER_SECTION * sections_per_block;
 
 	phys_addr = simple_strtoull(buf, NULL, 0);
+
+	if (phys_addr & ((pages_per_block << PAGE_SHIFT) - 1))
+		return -EINVAL;
 
 	for (i = 0; i < sections_per_block; i++) {
 		nid = memory_add_physaddr_to_nid(phys_addr);
 		ret = add_memory(nid, phys_addr,
 				 PAGES_PER_SECTION << PAGE_SHIFT);
 		if (ret)
-			break;
+			goto out;
 
 		phys_addr += MIN_MEMORY_BLOCK_SIZE;
 	}
 
-	if (ret)
-		count = ret;
-
-	return count;
+	ret = count;
+out:
+	return ret;
 }
 static CLASS_ATTR(probe, S_IWUSR, NULL, memory_probe_store);
 

@@ -17,6 +17,7 @@
 #include <linux/mfd/core.h>
 #include <linux/pm_runtime.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 
 int mfd_cell_enable(struct platform_device *pdev)
 {
@@ -87,6 +88,13 @@ static int mfd_add_device(struct device *parent, int id,
 		goto fail_device;
 
 	pdev->dev.parent = parent;
+
+	if (cell->pdata_size) {
+		ret = platform_device_add_data(pdev,
+					cell->platform_data, cell->pdata_size);
+		if (ret)
+			goto fail_res;
+	}
 
 	ret = mfd_platform_add_cell(pdev, cell);
 	if (ret)

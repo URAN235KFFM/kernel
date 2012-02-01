@@ -26,7 +26,6 @@
  * Bug, speed and maintainability fixes by Philippe De Muyter <phdm@macqel.be>
  */
 
-#include <linux/sys.h>
 #include <linux/linkage.h>
 #include <asm/unistd.h>
 #include <asm/thread_info.h>
@@ -62,7 +61,7 @@ enosys:
 	bra	1f
 
 ENTRY(system_call)
-	SAVE_ALL
+	SAVE_ALL_SYS
 	move	#0x2000,%sr		/* enable intrs again */
 
 	cmpl	#NR_syscalls,%d0
@@ -78,7 +77,7 @@ ENTRY(system_call)
 	movel	%d2,%a0
 	movel	%a0@,%a1		/* save top of frame */
 	movel	%sp,%a1@(TASK_THREAD+THREAD_ESP0)
-	btst	#(TIF_SYSCALL_TRACE%8),%a0@(TI_FLAGS+(31-TIF_SYSCALL_TRACE)/8)
+	btst	#(TIF_SYSCALL_TRACE%8),%a0@(TINFO_FLAGS+(31-TIF_SYSCALL_TRACE)/8)
 	bnes	1f
 
 	movel	%d3,%a0
@@ -113,11 +112,11 @@ ret_from_exception:
 	movel	%sp,%d1			/* get thread_info pointer */
 	andl	#-THREAD_SIZE,%d1	/* at base of kernel stack */
 	movel	%d1,%a0
-	movel	%a0@(TI_FLAGS),%d1	/* get thread_info->flags */
+	movel	%a0@(TINFO_FLAGS),%d1	/* get thread_info->flags */
 	andl	#(1<<TIF_NEED_RESCHED),%d1
 	jeq	Lkernel_return
 
-	movel	%a0@(TI_PREEMPTCOUNT),%d1
+	movel	%a0@(TINFO_PREEMPT),%d1
 	cmpl	#0,%d1
 	jne	Lkernel_return
 
@@ -137,14 +136,14 @@ Luser_return:
 	movel	%sp,%d1			/* get thread_info pointer */
 	andl	#-THREAD_SIZE,%d1	/* at base of kernel stack */
 	movel	%d1,%a0
-	movel	%a0@(TI_FLAGS),%d1	/* get thread_info->flags */
+	movel	%a0@(TINFO_FLAGS),%d1	/* get thread_info->flags */
 	jne	Lwork_to_do		/* still work to do */
 
 Lreturn:
 	RESTORE_USER
 
 Lwork_to_do:
-	movel	%a0@(TI_FLAGS),%d1	/* get thread_info->flags */
+	movel	%a0@(TINFO_FLAGS),%d1	/* get thread_info->flags */
 	move	#0x2000,%sr		/* enable intrs again */
 	btst	#TIF_NEED_RESCHED,%d1
 	jne	reschedule
@@ -166,9 +165,7 @@ Lsignal_return:
  * sources). Calls up to high level code to do all the work.
  */
 ENTRY(inthandler)
-	SAVE_ALL
-	moveq	#-1,%d0
-	movel	%d0,%sp@(PT_OFF_ORIG_D0)
+	SAVE_ALL_INT
 
 	movew	%sp@(PT_OFF_FORMATVEC),%d0 /* put exception # in d0 */
 	andl	#0x03fc,%d0		/* mask out vector only */
@@ -183,21 +180,23 @@ ENTRY(inthandler)
 
 /*
  * Beware - when entering resume, prev (the current task) is
- * in a0, next (the new task) is in a1,so don't change these
+ * in a0, next (the new task) is in a1, so don't change these
  * registers until their contents are no longer needed.
- * This is always called in supervisor mode, so don't bother to save
- * and restore sr; user's process sr is actually in the stack.
  */
 ENTRY(resume)
-	movel	%a0, %d1			/* get prev thread in d1 */
-	RDUSP
-	movel	%a2,%a0@(TASK_THREAD+THREAD_USP)
-
+	movew	%sr,%d1				 /* save current status */
+	movew	%d1,%a0@(TASK_THREAD+THREAD_SR)
+	movel	%a0,%d1				 /* get prev thread in d1 */
 	SAVE_SWITCH_STACK
 	movel	%sp,%a0@(TASK_THREAD+THREAD_KSP) /* save kernel stack pointer */
-	movel	%a1@(TASK_THREAD+THREAD_KSP),%sp /* restore new thread stack */
-	RESTORE_SWITCH_STACK
+	RDUSP					 /* movel %usp,%a3 */
+	movel	%a3,%a0@(TASK_THREAD+THREAD_USP) /* save thread user stack */
 
-	movel	%a1@(TASK_THREAD+THREAD_USP),%a0 /* restore thread user stack */
-	WRUSP
+	movel	%a1@(TASK_THREAD+THREAD_USP),%a3 /* restore thread user stack */
+	WRUSP					 /* movel %a3,%usp */
+	movel	%a1@(TASK_THREAD+THREAD_KSP),%sp /* restore new kernel stack */
+	movew	%a1@(TASK_THREAD+THREAD_SR),%d7	 /* restore new status */
+	movew	%d7,%sr
+	RESTORE_SWITCH_STACK
 	rts
+

@@ -36,7 +36,7 @@ EXPORT_SYMBOL(pm_power_off);
 
 static const struct desc_ptr no_idt = {};
 static int reboot_mode;
-enum reboot_type reboot_type = BOOT_KBD;
+enum reboot_type reboot_type = BOOT_ACPI;
 int reboot_force;
 
 #if defined(CONFIG_X86_32) && defined(CONFIG_SMP)
@@ -124,7 +124,7 @@ __setup("reboot=", reboot_setup);
  */
 
 /*
- * Some machines require the "reboot=b"  commandline option,
+ * Some machines require the "reboot=b" or "reboot=k"  commandline options,
  * this quirk makes that automatic.
  */
 static int __init set_bios_reboot(const struct dmi_system_id *d)
@@ -132,6 +132,15 @@ static int __init set_bios_reboot(const struct dmi_system_id *d)
 	if (reboot_type != BOOT_BIOS) {
 		reboot_type = BOOT_BIOS;
 		printk(KERN_INFO "%s series board detected. Selecting BIOS-method for reboots.\n", d->ident);
+	}
+	return 0;
+}
+
+static int __init set_kbd_reboot(const struct dmi_system_id *d)
+{
+	if (reboot_type != BOOT_KBD) {
+		reboot_type = BOOT_KBD;
+		printk(KERN_INFO "%s series board detected. Selecting KBD-method for reboot.\n", d->ident);
 	}
 	return 0;
 }
@@ -294,6 +303,14 @@ static struct dmi_system_id __initdata reboot_dmi_table[] = {
 			DMI_MATCH(DMI_BOARD_NAME, "VersaLogic Menlow board"),
 		},
 	},
+	{ /* Handle reboot issue on Acer Aspire one */
+		.callback = set_kbd_reboot,
+		.ident = "Acer Aspire One A110",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Acer"),
+			DMI_MATCH(DMI_PRODUCT_NAME, "AOA110"),
+		},
+	},
 	{ }
 };
 
@@ -411,12 +428,36 @@ static struct dmi_system_id __initdata pci_reboot_dmi_table[] = {
 			DMI_MATCH(DMI_PRODUCT_NAME, "iMac9,1"),
 		},
 	},
+	{	/* Handle problems with rebooting on the Latitude E6320. */
+		.callback = set_pci_reboot,
+		.ident = "Dell Latitude E6320",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Latitude E6320"),
+		},
+	},
 	{	/* Handle problems with rebooting on the Latitude E5420. */
 		.callback = set_pci_reboot,
 		.ident = "Dell Latitude E5420",
 		.matches = {
 			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
 			DMI_MATCH(DMI_PRODUCT_NAME, "Latitude E5420"),
+		},
+	},
+	{	/* Handle problems with rebooting on the Latitude E6420. */
+		.callback = set_pci_reboot,
+		.ident = "Dell Latitude E6420",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "Latitude E6420"),
+		},
+	},
+	{	/* Handle problems with rebooting on the OptiPlex 990. */
+		.callback = set_pci_reboot,
+		.ident = "Dell OptiPlex 990",
+		.matches = {
+			DMI_MATCH(DMI_SYS_VENDOR, "Dell Inc."),
+			DMI_MATCH(DMI_PRODUCT_NAME, "OptiPlex 990"),
 		},
 	},
 	{ }
@@ -440,7 +481,7 @@ static inline void kb_wait(void)
 	}
 }
 
-static void vmxoff_nmi(int cpu, struct die_args *args)
+static void vmxoff_nmi(int cpu, struct pt_regs *regs)
 {
 	cpu_emergency_vmxoff();
 }
@@ -486,9 +527,24 @@ void __attribute__((weak)) mach_reboot_fixups(void)
 {
 }
 
+/*
+ * Windows compatible x86 hardware expects the following on reboot:
+ *
+ * 1) If the FADT has the ACPI reboot register flag set, try it
+ * 2) If still alive, write to the keyboard controller
+ * 3) If still alive, write to the ACPI reboot register again
+ * 4) If still alive, write to the keyboard controller again
+ *
+ * If the machine is still alive at this stage, it gives up. We default to
+ * following the same pattern, except that if we're still alive after (4) we'll
+ * try to force a triple fault and then cycle between hitting the keyboard
+ * controller and doing that
+ */
 static void native_machine_emergency_restart(void)
 {
 	int i;
+	int attempt = 0;
+	int orig_reboot_type = reboot_type;
 
 	if (reboot_emergency)
 		emergency_vmx_disable_all();
@@ -510,6 +566,13 @@ static void native_machine_emergency_restart(void)
 				outb(0xfe, 0x64); /* pulse reset low */
 				udelay(50);
 			}
+			if (attempt == 0 && orig_reboot_type == BOOT_ACPI) {
+				attempt = 1;
+				reboot_type = BOOT_ACPI;
+			} else {
+				reboot_type = BOOT_TRIPLE;
+			}
+			break;
 
 		case BOOT_TRIPLE:
 			load_idt(&no_idt);
@@ -690,13 +753,9 @@ static nmi_shootdown_cb shootdown_callback;
 
 static atomic_t waiting_for_crash_ipi;
 
-static int crash_nmi_callback(struct notifier_block *self,
-			unsigned long val, void *data)
+static int crash_nmi_callback(unsigned int val, struct pt_regs *regs)
 {
 	int cpu;
-
-	if (val != DIE_NMI)
-		return NOTIFY_OK;
 
 	cpu = raw_smp_processor_id();
 
@@ -705,10 +764,10 @@ static int crash_nmi_callback(struct notifier_block *self,
 	 * an NMI if system was initially booted with nmi_watchdog parameter.
 	 */
 	if (cpu == crashing_cpu)
-		return NOTIFY_STOP;
+		return NMI_HANDLED;
 	local_irq_disable();
 
-	shootdown_callback(cpu, (struct die_args *)data);
+	shootdown_callback(cpu, regs);
 
 	atomic_dec(&waiting_for_crash_ipi);
 	/* Assume hlt works */
@@ -716,19 +775,13 @@ static int crash_nmi_callback(struct notifier_block *self,
 	for (;;)
 		cpu_relax();
 
-	return 1;
+	return NMI_HANDLED;
 }
 
 static void smp_send_nmi_allbutself(void)
 {
 	apic->send_IPI_allbutself(NMI_VECTOR);
 }
-
-static struct notifier_block crash_nmi_nb = {
-	.notifier_call = crash_nmi_callback,
-	/* we want to be the first one called */
-	.priority = NMI_LOCAL_HIGH_PRIOR+1,
-};
 
 /* Halt all other CPUs, calling the specified function on each of them
  *
@@ -748,7 +801,8 @@ void nmi_shootdown_cpus(nmi_shootdown_cb callback)
 
 	atomic_set(&waiting_for_crash_ipi, num_online_cpus() - 1);
 	/* Would it be better to replace the trap vector here? */
-	if (register_die_notifier(&crash_nmi_nb))
+	if (register_nmi_handler(NMI_LOCAL, crash_nmi_callback,
+				 NMI_FLAG_FIRST, "crash"))
 		return;		/* return what? */
 	/* Ensure the new callback function is set before sending
 	 * out the NMI

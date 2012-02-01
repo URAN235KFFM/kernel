@@ -18,6 +18,7 @@
 #include <linux/msi.h>
 #include <linux/slab.h>
 #include <linux/rcupdate.h>
+#include <linux/ratelimit.h>
 #include <asm/signal.h>
 
 #include <linux/kvm.h>
@@ -26,6 +27,10 @@
 #include <linux/kvm_types.h>
 
 #include <asm/kvm_host.h>
+
+#ifndef KVM_MMIO_SIZE
+#define KVM_MMIO_SIZE 8
+#endif
 
 /*
  * vcpu->requests bit members
@@ -43,7 +48,8 @@
 #define KVM_REQ_DEACTIVATE_FPU    10
 #define KVM_REQ_EVENT             11
 #define KVM_REQ_APF_HALT          12
-#define KVM_REQ_NMI               13
+#define KVM_REQ_STEAL_UPDATE      13
+#define KVM_REQ_NMI               14
 
 #define KVM_USERSPACE_IRQ_SOURCE_ID	0
 
@@ -51,16 +57,16 @@ struct kvm;
 struct kvm_vcpu;
 extern struct kmem_cache *kvm_vcpu_cache;
 
-/*
- * It would be nice to use something smarter than a linear search, TBD...
- * Thankfully we dont expect many devices to register (famous last words :),
- * so until then it will suffice.  At least its abstracted so we can change
- * in one place.
- */
+struct kvm_io_range {
+	gpa_t addr;
+	int len;
+	struct kvm_io_device *dev;
+};
+
 struct kvm_io_bus {
 	int                   dev_count;
-#define NR_IOBUS_DEVS 200
-	struct kvm_io_device *devs[NR_IOBUS_DEVS];
+#define NR_IOBUS_DEVS 300
+	struct kvm_io_range range[NR_IOBUS_DEVS];
 };
 
 enum kvm_bus {
@@ -73,8 +79,8 @@ int kvm_io_bus_write(struct kvm *kvm, enum kvm_bus bus_idx, gpa_t addr,
 		     int len, const void *val);
 int kvm_io_bus_read(struct kvm *kvm, enum kvm_bus bus_idx, gpa_t addr, int len,
 		    void *val);
-int kvm_io_bus_register_dev(struct kvm *kvm, enum kvm_bus bus_idx,
-			    struct kvm_io_device *dev);
+int kvm_io_bus_register_dev(struct kvm *kvm, enum kvm_bus bus_idx, gpa_t addr,
+			    int len, struct kvm_io_device *dev);
 int kvm_io_bus_unregister_dev(struct kvm *kvm, enum kvm_bus bus_idx,
 			      struct kvm_io_device *dev);
 
@@ -133,7 +139,8 @@ struct kvm_vcpu {
 	int mmio_read_completed;
 	int mmio_is_write;
 	int mmio_size;
-	unsigned char mmio_data[8];
+	int mmio_index;
+	unsigned char mmio_data[KVM_MMIO_SIZE];
 	gpa_t mmio_phys_addr;
 #endif
 
@@ -251,8 +258,9 @@ struct kvm {
 	struct kvm_arch arch;
 	atomic_t users_count;
 #ifdef KVM_COALESCED_MMIO_PAGE_OFFSET
-	struct kvm_coalesced_mmio_dev *coalesced_mmio_dev;
 	struct kvm_coalesced_mmio_ring *coalesced_mmio_ring;
+	spinlock_t ring_lock;
+	struct list_head coalesced_zones;
 #endif
 
 	struct mutex irq_lock;
@@ -276,11 +284,8 @@ struct kvm {
 
 /* The guest did something we don't support. */
 #define pr_unimpl(vcpu, fmt, ...)					\
- do {									\
-	if (printk_ratelimit())						\
-		printk(KERN_ERR "kvm: %i: cpu%i " fmt,			\
-		       current->tgid, (vcpu)->vcpu_id , ## __VA_ARGS__); \
- } while (0)
+	pr_err_ratelimited("kvm: %i: cpu%i " fmt,			\
+			   current->tgid, (vcpu)->vcpu_id , ## __VA_ARGS__)
 
 #define kvm_printf(kvm, fmt ...) printk(KERN_DEBUG fmt)
 #define vcpu_printf(vcpu, fmt...) kvm_printf(vcpu->kvm, fmt)
@@ -292,9 +297,10 @@ static inline struct kvm_vcpu *kvm_get_vcpu(struct kvm *kvm, int i)
 }
 
 #define kvm_for_each_vcpu(idx, vcpup, kvm) \
-	for (idx = 0, vcpup = kvm_get_vcpu(kvm, idx); \
-	     idx < atomic_read(&kvm->online_vcpus) && vcpup; \
-	     vcpup = kvm_get_vcpu(kvm, ++idx))
+	for (idx = 0; \
+	     idx < atomic_read(&kvm->online_vcpus) && \
+	     (vcpup = kvm_get_vcpu(kvm, idx)) != NULL; \
+	     idx++)
 
 int kvm_vcpu_init(struct kvm_vcpu *vcpu, struct kvm *kvm, unsigned id);
 void kvm_vcpu_uninit(struct kvm_vcpu *vcpu);
@@ -321,12 +327,17 @@ static inline struct kvm_memslots *kvm_memslots(struct kvm *kvm)
 static inline int is_error_hpa(hpa_t hpa) { return hpa >> HPA_MSB; }
 
 extern struct page *bad_page;
+extern struct page *fault_page;
+
 extern pfn_t bad_pfn;
+extern pfn_t fault_pfn;
 
 int is_error_page(struct page *page);
 int is_error_pfn(pfn_t pfn);
 int is_hwpoison_pfn(pfn_t pfn);
 int is_fault_pfn(pfn_t pfn);
+int is_noslot_pfn(pfn_t pfn);
+int is_invalid_pfn(pfn_t pfn);
 int kvm_is_error_hva(unsigned long addr);
 int kvm_set_memory_region(struct kvm *kvm,
 			  struct kvm_userspace_memory_region *mem,
@@ -365,7 +376,6 @@ pfn_t gfn_to_pfn_prot(struct kvm *kvm, gfn_t gfn, bool write_fault,
 		      bool *writable);
 pfn_t gfn_to_pfn_memslot(struct kvm *kvm,
 			 struct kvm_memory_slot *slot, gfn_t gfn);
-int memslot_id(struct kvm *kvm, gfn_t gfn);
 void kvm_release_pfn_dirty(pfn_t);
 void kvm_release_pfn_clean(pfn_t pfn);
 void kvm_set_pfn_dirty(pfn_t pfn);
@@ -377,6 +387,8 @@ int kvm_read_guest_page(struct kvm *kvm, gfn_t gfn, void *data, int offset,
 int kvm_read_guest_atomic(struct kvm *kvm, gpa_t gpa, void *data,
 			  unsigned long len);
 int kvm_read_guest(struct kvm *kvm, gpa_t gpa, void *data, unsigned long len);
+int kvm_read_guest_cached(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
+			   void *data, unsigned long len);
 int kvm_write_guest_page(struct kvm *kvm, gfn_t gfn, const void *data,
 			 int offset, int len);
 int kvm_write_guest(struct kvm *kvm, gpa_t gpa, const void *data,
@@ -513,6 +525,7 @@ struct kvm_assigned_dev_kernel {
 	struct kvm *kvm;
 	spinlock_t intx_lock;
 	char irq_name[32];
+	struct pci_saved_state *pci_saved_state;
 };
 
 struct kvm_irq_mask_notifier {
@@ -587,14 +600,28 @@ static inline int kvm_deassign_device(struct kvm *kvm,
 
 static inline void kvm_guest_enter(void)
 {
+	BUG_ON(preemptible());
 	account_system_vtime(current);
 	current->flags |= PF_VCPU;
+	/* KVM does not hold any references to rcu protected data when it
+	 * switches CPU into a guest mode. In fact switching to a guest mode
+	 * is very similar to exiting to userspase from rcu point of view. In
+	 * addition CPU may stay in a guest mode for quite a long time (up to
+	 * one time slice). Lets treat guest mode as quiescent state, just like
+	 * we do with user-mode execution.
+	 */
+	rcu_virt_note_context_switch(smp_processor_id());
 }
 
 static inline void kvm_guest_exit(void)
 {
 	account_system_vtime(current);
 	current->flags &= ~PF_VCPU;
+}
+
+static inline int memslot_id(struct kvm *kvm, gfn_t gfn)
+{
+	return gfn_to_memslot(kvm, gfn)->id;
 }
 
 static inline unsigned long gfn_to_hva_memslot(struct kvm_memory_slot *slot,

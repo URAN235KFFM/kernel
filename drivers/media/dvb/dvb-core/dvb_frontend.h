@@ -209,6 +209,7 @@ struct dvb_tuner_ops {
 
 	int (*get_frequency)(struct dvb_frontend *fe, u32 *frequency);
 	int (*get_bandwidth)(struct dvb_frontend *fe, u32 *bandwidth);
+	int (*get_if_frequency)(struct dvb_frontend *fe, u32 *frequency);
 
 #define TUNER_STATUS_LOCKED 1
 #define TUNER_STATUS_STEREO 2
@@ -358,6 +359,9 @@ struct dtv_frontend_properties {
 
 	/* ISDB-T specifics */
 	u32			isdbs_ts_id;
+
+	/* DVB-T2 specifics */
+	u32                     dvbt2_plp_id;
 };
 
 struct dvb_frontend {

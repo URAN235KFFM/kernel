@@ -1,6 +1,4 @@
 /*
- * linux/drivers/char/synclink.c
- *
  * $Id: synclink.c,v 4.38 2005/11/07 16:30:34 paulkf Exp $
  *
  * Device driver for Microgate SyncLink ISA and PCI
@@ -2125,7 +2123,6 @@ static int mgsl_write(struct tty_struct * tty,
 
 	if ( info->params.mode == MGSL_MODE_HDLC ||
 			info->params.mode == MGSL_MODE_RAW ) {
-		/* operating in synchronous (frame oriented) mode */
 		/* operating in synchronous (frame oriented) mode */
 		if (info->tx_active) {
 

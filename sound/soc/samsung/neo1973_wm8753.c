@@ -367,8 +367,6 @@ static int neo1973_wm8753_init(struct snd_soc_pcm_runtime *rtd)
 			return ret;
 	}
 
-	snd_soc_dapm_sync(dapm);
-
 	return 0;
 }
 
@@ -409,8 +407,6 @@ static int neo1973_lm4857_init(struct snd_soc_dapm_context *dapm)
 	snd_soc_dapm_ignore_suspend(dapm, "Handset Spk");
 	snd_soc_dapm_ignore_suspend(dapm, "Headphone");
 
-	snd_soc_dapm_sync(dapm);
-
 	return 0;
 }
 
@@ -432,7 +428,6 @@ static struct snd_soc_dai_link neo1973_dai[] = {
 { /* Voice via BT */
 	.name = "Bluetooth",
 	.stream_name = "Voice",
-	.platform_name = "samsung-audio",
 	.cpu_dai_name = "dfbmcs320-pcm",
 	.codec_dai_name = "wm8753-voice",
 	.codec_name = "wm8753-codec.0-001a",

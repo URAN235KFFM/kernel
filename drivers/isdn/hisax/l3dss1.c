@@ -353,7 +353,7 @@ l3dss1_parse_facility(struct PStack *st, struct l3_process *pc,
 			         { l3dss1_dummy_invoke(st, cr, id, ident, p, nlen);
                                    return;
                                  } 
-#ifdef HISAX_DE_AOC
+#ifdef CONFIG_DE_AOC
 			{
 
 #define FOO1(s,a,b) \
@@ -422,9 +422,9 @@ l3dss1_parse_facility(struct PStack *st, struct l3_process *pc,
 #undef FOO1
 
 			}
-#else  /* not HISAX_DE_AOC */
+#else  /* not CONFIG_DE_AOC */
                         l3_debug(st, "invoke break");
-#endif /* not HISAX_DE_AOC */
+#endif /* not CONFIG_DE_AOC */
 			break;
 		case 2:	/* return result */
 			 /* if no process available handle separately */ 
@@ -2943,7 +2943,7 @@ global_handler(struct PStack *st, int mt, struct sk_buff *skb)
 static void
 dss1up(struct PStack *st, int pr, void *arg)
 {
-	int i, mt, cr, cause, callState;
+	int i, mt, cr, callState;
 	char *ptr;
 	u_char *p;
 	struct sk_buff *skb = arg;
@@ -3034,12 +3034,10 @@ dss1up(struct PStack *st, int pr, void *arg)
 				return;
 			}
 		} else if (mt == MT_STATUS) {
-			cause = 0;
 			if ((ptr = findie(skb->data, skb->len, IE_CAUSE, 0)) != NULL) {
 				ptr++;
 				if (*ptr++ == 2)
 					ptr++;
-				cause = *ptr & 0x7f;
 			}
 			callState = 0;
 			if ((ptr = findie(skb->data, skb->len, IE_CALL_STATE, 0)) != NULL) {

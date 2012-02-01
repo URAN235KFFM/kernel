@@ -24,7 +24,6 @@
 #define KMSG_COMPONENT "ctcm"
 #define pr_fmt(fmt) KMSG_COMPONENT ": " fmt
 
-#include <linux/kernel_stat.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
@@ -672,7 +671,6 @@ static int ctcmpc_transmit_skb(struct channel *ch, struct sk_buff *skb)
 	int ccw_idx;
 	unsigned long hi;
 	unsigned long saveflags = 0;	/* avoids compiler warning */
-	__u16 block_len;
 
 	CTCM_PR_DEBUG("Enter %s: %s, cp=%i ch=0x%p id=%s state=%s\n",
 			__func__, dev->name, smp_processor_id(), ch,
@@ -719,7 +717,6 @@ static int ctcmpc_transmit_skb(struct channel *ch, struct sk_buff *skb)
 	 */
 	atomic_inc(&skb->users);
 
-	block_len = skb->len + TH_HEADER_LENGTH + PDU_HEADER_LENGTH;
 	/*
 	 * IDAL support in CTCM is broken, so we have to
 	 * care about skb's above 2G ourselves.
@@ -1205,7 +1202,6 @@ static void ctcm_irq_handler(struct ccw_device *cdev,
 	int cstat;
 	int dstat;
 
-	kstat_cpu(smp_processor_id()).irqs[IOINT_CTC]++;
 	CTCM_DBF_TEXT_(TRACE, CTC_DBF_DEBUG,
 		"Enter %s(%s)", CTCM_FUNTAIL, dev_name(&cdev->dev));
 
@@ -1771,6 +1767,7 @@ static struct ccw_driver ctcm_ccw_driver = {
 	.ids	= ctcm_ids,
 	.probe	= ccwgroup_probe_ccwdev,
 	.remove	= ccwgroup_remove_ccwdev,
+	.int_class = IOINT_CTC,
 };
 
 static struct ccwgroup_driver ctcm_group_driver = {

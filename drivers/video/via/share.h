@@ -22,13 +22,7 @@
 #ifndef __SHARE_H__
 #define __SHARE_H__
 
-/* Define Return Value */
-#define FAIL        -1
-#define OK          1
-
-#ifndef NULL
-#define NULL 0
-#endif
+#include "via_modesetting.h"
 
 /* Define Bit Field */
 #define BIT0    0x01
@@ -290,6 +284,7 @@
 #define HW_LAYOUT_LCD_EXTERNAL_LCD2 0x10
 
 /* Definition Refresh Rate */
+#define REFRESH_49      49
 #define REFRESH_50      50
 #define REFRESH_60      60
 #define REFRESH_75      75
@@ -564,8 +559,8 @@
 #define M1200X720_R60_VSP       POSITIVE
 
 /* 1200x900@60 Sync Polarity (DCON) */
-#define M1200X900_R60_HSP       NEGATIVE
-#define M1200X900_R60_VSP       NEGATIVE
+#define M1200X900_R60_HSP       POSITIVE
+#define M1200X900_R60_VSP       POSITIVE
 
 /* 1280x600@60 Sync Polarity (GTF Mode) */
 #define M1280x600_R60_HSP       NEGATIVE
@@ -574,10 +569,6 @@
 /* 1280x720@50 Sync Polarity  (GTF Mode) */
 #define M1280X720_R50_HSP       NEGATIVE
 #define M1280X720_R50_VSP       POSITIVE
-
-/* 1280x720@60 Sync Polarity  (CEA Mode) */
-#define M1280X720_CEA_R60_HSP       POSITIVE
-#define M1280X720_CEA_R60_VSP       POSITIVE
 
 /* 1440x900@60 Sync Polarity (CVT Mode) */
 #define M1440X900_R60_HSP       NEGATIVE
@@ -619,10 +610,6 @@
 #define M1920X1200_RB_R60_HSP  POSITIVE
 #define M1920X1200_RB_R60_VSP  NEGATIVE
 
-/* 1920x1080@60 Sync Polarity  (CEA Mode) */
-#define M1920X1080_CEA_R60_HSP       POSITIVE
-#define M1920X1080_CEA_R60_VSP       POSITIVE
-
 /* 2048x1536@60 Sync Polarity (CVT Mode) */
 #define M2048x1536_R60_HSP      NEGATIVE
 #define M2048x1536_R60_VSP      POSITIVE
@@ -649,10 +636,6 @@
 #define V_SYNC_SATRT_SHADOW_INDEX   18
 #define V_SYNC_END_SHADOW_INDEX     19
 
-/* Definition Video Mode Pixel Clock (picoseconds)
-*/
-#define RES_640X480_60HZ_PIXCLOCK    39722
-
 /* LCD display method
 */
 #define     LCD_EXPANDSION              0x00
@@ -662,23 +645,6 @@
 */
 #define     LCD_OPENLDI               0x00
 #define     LCD_SPWG                  0x01
-
-/* Define display timing
-*/
-struct display_timing {
-	u16 hor_total;
-	u16 hor_addr;
-	u16 hor_blank_start;
-	u16 hor_blank_end;
-	u16 hor_sync_start;
-	u16 hor_sync_end;
-	u16 ver_total;
-	u16 ver_addr;
-	u16 ver_blank_start;
-	u16 ver_blank_end;
-	u16 ver_sync_start;
-	u16 ver_sync_end;
-};
 
 struct crt_mode_table {
 	int refresh_rate;

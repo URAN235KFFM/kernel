@@ -976,6 +976,10 @@ static int tda18271_set_params(struct dvb_frontend *fe,
 			tda_warn("bandwidth not set!\n");
 			return -EINVAL;
 		}
+	} else if (fe->ops.info.type == FE_QAM) {
+		/* DVB-C */
+		map = &std_map->qam_8;
+		bw = 8000000;
 	} else {
 		tda_warn("modulation type not supported!\n");
 		return -EINVAL;
@@ -1226,7 +1230,7 @@ static int tda18271_set_config(struct dvb_frontend *fe, void *priv_cfg)
 	return 0;
 }
 
-static struct dvb_tuner_ops tda18271_tuner_ops = {
+static const struct dvb_tuner_ops tda18271_tuner_ops = {
 	.info = {
 		.name = "NXP TDA18271HD",
 		.frequency_min  =  45000000,

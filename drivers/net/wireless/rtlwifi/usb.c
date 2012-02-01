@@ -24,7 +24,11 @@
  * Hsinchu 300, Taiwan.
  *
  *****************************************************************************/
+
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/usb.h>
+#include <linux/export.h>
 #include "core.h"
 #include "wifi.h"
 #include "usb.h"
@@ -104,9 +108,8 @@ static int _usbctrl_vendorreq_sync_read(struct usb_device *udev, u8 request,
 				 pdata, len, 0); /* max. timeout */
 
 	if (status < 0)
-		printk(KERN_ERR "reg 0x%x, usbctrl_vendorreq TimeOut! "
-		       "status:0x%x value=0x%x\n", value, status,
-		       *(u32 *)pdata);
+		pr_err("reg 0x%x, usbctrl_vendorreq TimeOut! status:0x%x value=0x%x\n",
+		       value, status, *(u32 *)pdata);
 	return status;
 }
 
@@ -189,44 +192,6 @@ static void _usb_write32_async(struct rtl_priv *rtlpriv, u32 addr, u32 val)
 	_usb_write_async(to_usb_device(dev), addr, val, 4);
 }
 
-static int _usb_nbytes_read_write(struct usb_device *udev, bool read, u32 addr,
-				  u16 len, u8 *pdata)
-{
-	int status;
-	u8 request;
-	u16 wvalue;
-	u16 index;
-
-	request = REALTEK_USB_VENQT_CMD_REQ;
-	index = REALTEK_USB_VENQT_CMD_IDX; /* n/a */
-	wvalue = (u16)addr;
-	if (read)
-		status = _usbctrl_vendorreq_sync_read(udev, request, wvalue,
-						      index, pdata, len);
-	else
-		status = _usbctrl_vendorreq_async_write(udev, request, wvalue,
-							index, pdata, len);
-	return status;
-}
-
-static int _usb_readN_sync(struct rtl_priv *rtlpriv, u32 addr, u16 len,
-			   u8 *pdata)
-{
-	struct device *dev = rtlpriv->io.dev;
-
-	return _usb_nbytes_read_write(to_usb_device(dev), true, addr, len,
-				       pdata);
-}
-
-static int _usb_writeN_async(struct rtl_priv *rtlpriv, u32 addr, u16 len,
-			     u8 *pdata)
-{
-	struct device *dev = rtlpriv->io.dev;
-
-	return _usb_nbytes_read_write(to_usb_device(dev), false, addr, len,
-				      pdata);
-}
-
 static void _rtl_usb_io_handler_init(struct device *dev,
 				     struct ieee80211_hw *hw)
 {
@@ -237,11 +202,9 @@ static void _rtl_usb_io_handler_init(struct device *dev,
 	rtlpriv->io.write8_async	= _usb_write8_async;
 	rtlpriv->io.write16_async	= _usb_write16_async;
 	rtlpriv->io.write32_async	= _usb_write32_async;
-	rtlpriv->io.writeN_async	= _usb_writeN_async;
 	rtlpriv->io.read8_sync		= _usb_read8_sync;
 	rtlpriv->io.read16_sync		= _usb_read16_sync;
 	rtlpriv->io.read32_sync		= _usb_read32_sync;
-	rtlpriv->io.readN_sync		= _usb_readN_sync;
 }
 
 static void _rtl_usb_io_handler_release(struct ieee80211_hw *hw)
@@ -316,7 +279,7 @@ static int _rtl_usb_init_rx(struct ieee80211_hw *hw)
 	rtlusb->usb_rx_segregate_hdl =
 		rtlpriv->cfg->usb_interface_cfg->usb_rx_segregate_hdl;
 
-	printk(KERN_INFO "rtl8192cu: rx_max_size %d, rx_urb_num %d, in_ep %d\n",
+	pr_info("rx_max_size %d, rx_urb_num %d, in_ep %d\n",
 		rtlusb->rx_max_size, rtlusb->rx_urb_num, rtlusb->in_ep);
 	init_usb_anchor(&rtlusb->rx_submitted);
 	return 0;
@@ -580,7 +543,7 @@ static void _rtl_rx_completed(struct urb *_urb)
 		} else{
 			/* TO DO */
 			_rtl_rx_pre_process(hw, skb);
-			printk(KERN_ERR "rtlwifi: rx agg not supported\n");
+			pr_err("rx agg not supported\n");
 		}
 		goto resubmit;
 	}
@@ -852,6 +815,7 @@ static void _rtl_usb_tx_preprocess(struct ieee80211_hw *hw, struct sk_buff *skb,
 	struct rtl_mac *mac = rtl_mac(rtl_priv(hw));
 	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
 	struct rtl_tx_desc *pdesc = NULL;
+	struct rtl_tcb_desc tcb_desc;
 	struct ieee80211_hdr *hdr = (struct ieee80211_hdr *)(skb->data);
 	__le16 fc = hdr->frame_control;
 	u8 *pda_addr = hdr->addr1;
@@ -860,8 +824,18 @@ static void _rtl_usb_tx_preprocess(struct ieee80211_hw *hw, struct sk_buff *skb,
 	u8 tid = 0;
 	u16 seq_number = 0;
 
-	if (ieee80211_is_mgmt(fc))
-		rtl_tx_mgmt_proc(hw, skb);
+	memset(&tcb_desc, 0, sizeof(struct rtl_tcb_desc));
+	if (ieee80211_is_auth(fc)) {
+		RT_TRACE(rtlpriv, COMP_SEND, DBG_DMESG, ("MAC80211_LINKING\n"));
+		rtl_ips_nic_on(hw);
+	}
+
+	if (rtlpriv->psc.sw_ps_enabled) {
+		if (ieee80211_is_data(fc) && !ieee80211_is_nullfunc(fc) &&
+		    !ieee80211_has_pm(fc))
+			hdr->frame_control |= cpu_to_le16(IEEE80211_FCTL_PM);
+	}
+
 	rtl_action_proc(hw, skb, true);
 	if (is_multicast_ether_addr(pda_addr))
 		rtlpriv->stats.txbytesmulticast += skb->len;
@@ -878,7 +852,7 @@ static void _rtl_usb_tx_preprocess(struct ieee80211_hw *hw, struct sk_buff *skb,
 		seq_number <<= 4;
 	}
 	rtlpriv->cfg->ops->fill_tx_desc(hw, hdr, (u8 *)pdesc, info, skb,
-					hw_queue);
+					hw_queue, &tcb_desc);
 	if (!ieee80211_has_morefrags(hdr->frame_control)) {
 		if (qc)
 			mac->tids[tid].seq_number = seq_number;
@@ -887,7 +861,8 @@ static void _rtl_usb_tx_preprocess(struct ieee80211_hw *hw, struct sk_buff *skb,
 		rtlpriv->cfg->ops->led_control(hw, LED_CTL_TX);
 }
 
-static int rtl_usb_tx(struct ieee80211_hw *hw, struct sk_buff *skb)
+static int rtl_usb_tx(struct ieee80211_hw *hw, struct sk_buff *skb,
+		      struct rtl_tcb_desc *dummy)
 {
 	struct rtl_usb *rtlusb = rtl_usbdev(rtl_usbpriv(hw));
 	struct rtl_hal *rtlhal = rtl_hal(rtl_priv(hw));

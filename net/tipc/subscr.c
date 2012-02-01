@@ -109,7 +109,7 @@ static void subscr_send_event(struct subscription *sub,
 	sub->evt.found_upper = htohl(found_upper, sub->swap);
 	sub->evt.port.ref = htohl(port_ref, sub->swap);
 	sub->evt.port.node = htohl(node, sub->swap);
-	tipc_send(sub->server_ref, 1, &msg_sect);
+	tipc_send(sub->server_ref, 1, &msg_sect, msg_sect.iov_len);
 }
 
 /**
@@ -151,7 +151,7 @@ void tipc_subscr_report_overlap(struct subscription *sub,
 	if (!must && !(sub->filter & TIPC_SUB_PORTS))
 		return;
 
-	sub->event_cb(sub, found_lower, found_upper, event, port_ref, node);
+	subscr_send_event(sub, found_lower, found_upper, event, port_ref, node);
 }
 
 /**
@@ -365,7 +365,6 @@ static struct subscription *subscr_subscribe(struct tipc_subscr *s,
 		subscr_terminate(subscriber);
 		return NULL;
 	}
-	sub->event_cb = subscr_send_event;
 	INIT_LIST_HEAD(&sub->nameseq_list);
 	list_add(&sub->subscription_list, &subscriber->subscription_list);
 	sub->server_ref = subscriber->port_ref;
@@ -521,7 +520,7 @@ static void subscr_named_msg_event(void *usr_handle,
 
 	/* Send an ACK- to complete connection handshaking */
 
-	tipc_send(server_port_ref, 0, NULL);
+	tipc_send(server_port_ref, 0, NULL, 0);
 
 	/* Handle optional subscription request */
 

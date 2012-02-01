@@ -20,6 +20,7 @@
 #include <linux/memblock.h>
 #include <linux/sort.h>
 #include <linux/dma-mapping.h>
+#include <linux/export.h>
 
 #include <asm/sections.h>
 #include <asm/setup.h>
@@ -62,7 +63,7 @@ void show_mem(unsigned int filter)
 	struct meminfo *mi = &meminfo;
 
 	printk(KERN_DEFAULT "Mem-info:\n");
-	show_free_areas();
+	show_free_areas(filter);
 
 	for_each_bank(i, mi) {
 		struct membank *bank = &mi->bank[i];

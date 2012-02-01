@@ -85,7 +85,7 @@ struct dst_entry *inet6_csk_route_req(struct sock *sk,
  * request_sock (formerly open request) hash tables.
  */
 static u32 inet6_synq_hash(const struct in6_addr *raddr, const __be16 rport,
-			   const u32 rnd, const u16 synq_hsize)
+			   const u32 rnd, const u32 synq_hsize)
 {
 	u32 c;
 
@@ -203,7 +203,7 @@ struct dst_entry *__inet6_csk_dst_check(struct sock *sk, u32 cookie)
 	return dst;
 }
 
-int inet6_csk_xmit(struct sk_buff *skb)
+int inet6_csk_xmit(struct sk_buff *skb, struct flowi *fl_unused)
 {
 	struct sock *sk = skb->sk;
 	struct inet_sock *inet = inet_sk(sk);
@@ -211,6 +211,7 @@ int inet6_csk_xmit(struct sk_buff *skb)
 	struct flowi6 fl6;
 	struct dst_entry *dst;
 	struct in6_addr *final_p, final;
+	int res;
 
 	memset(&fl6, 0, sizeof(fl6));
 	fl6.flowi6_proto = sk->sk_protocol;
@@ -241,12 +242,14 @@ int inet6_csk_xmit(struct sk_buff *skb)
 		__inet6_csk_dst_store(sk, dst, NULL, NULL);
 	}
 
-	skb_dst_set(skb, dst_clone(dst));
+	rcu_read_lock();
+	skb_dst_set_noref(skb, dst);
 
 	/* Restore final destination back after routing done */
 	ipv6_addr_copy(&fl6.daddr, &np->daddr);
 
-	return ip6_xmit(sk, skb, &fl6, np->opt);
+	res = ip6_xmit(sk, skb, &fl6, np->opt, np->tclass);
+	rcu_read_unlock();
+	return res;
 }
-
 EXPORT_SYMBOL_GPL(inet6_csk_xmit);

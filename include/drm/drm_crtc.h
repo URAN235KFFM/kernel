@@ -183,7 +183,9 @@ enum subpixel_order {
 	SubPixelNone,
 };
 
-
+#define DRM_COLOR_FORMAT_RGB444		(1<<0)
+#define DRM_COLOR_FORMAT_YCRCB444	(1<<1)
+#define DRM_COLOR_FORMAT_YCRCB422	(1<<2)
 /*
  * Describes a given display (e.g. CRT or flat panel) and its limitations.
  */
@@ -198,8 +200,12 @@ struct drm_display_info {
 	unsigned int min_vfreq, max_vfreq;
 	unsigned int min_hfreq, max_hfreq;
 	unsigned int pixel_clock;
+	unsigned int bpc;
 
 	enum subpixel_order subpixel_order;
+	u32 color_formats;
+
+	u8 cea_rev;
 
 	char *raw_edid; /* if any */
 };
@@ -460,6 +466,8 @@ enum drm_connector_force {
 /* DACs should rarely do this without a lot of testing */
 #define DRM_CONNECTOR_POLL_DISCONNECT (1 << 2)
 
+#define MAX_ELD_BYTES	128
+
 /**
  * drm_connector - central DRM connector control structure
  * @crtc: CRTC this connector is currently connected to, NULL if none
@@ -516,6 +524,15 @@ struct drm_connector {
 	uint32_t encoder_ids[DRM_CONNECTOR_MAX_ENCODER];
 	uint32_t force_encoder_id;
 	struct drm_encoder *encoder; /* currently active encoder */
+
+	/* EDID bits */
+	uint8_t eld[MAX_ELD_BYTES];
+	bool dvi_dual;
+	int max_tmds_clock;	/* in MHz */
+	bool latency_present[2];
+	int video_latency[2];	/* [0]: progressive, [1]: interlaced */
+	int audio_latency[2];
+	int null_edid_counter; /* needed to workaround some HW bugs where we get all 0s */
 };
 
 /**
@@ -796,6 +813,7 @@ extern struct drm_display_mode *drm_gtf_mode_complex(struct drm_device *dev,
 extern int drm_add_modes_noedid(struct drm_connector *connector,
 				int hdisplay, int vdisplay);
 
+extern int drm_edid_header_is_valid(const u8 *raw_edid);
 extern bool drm_edid_is_valid(struct edid *edid);
 struct drm_display_mode *drm_mode_find_dmt(struct drm_device *dev,
 					   int hsize, int vsize, int fresh);

@@ -66,21 +66,10 @@ void __init board_setup(void)
 	au_writel(pin_func, SYS_PINFUNC);
 
 	/* Enable UART */
-	au_writel(0x01, UART3_ADDR + UART_MOD_CNTRL); /* clock enable (CE) */
-	mdelay(10);
-	au_writel(0x03, UART3_ADDR + UART_MOD_CNTRL); /* CE and "enable" */
-	mdelay(10);
-
-	/* Enable DTR = USB power up */
-	au_writel(0x01, UART3_ADDR + UART_MCR); /* UART_MCR_DTR is 0x01??? */
-
-#ifdef CONFIG_PCI
-#if defined(__MIPSEB__)
-	au_writel(0xf | (2 << 6) | (1 << 4), Au1500_PCI_CFG);
-#else
-	au_writel(0xf, Au1500_PCI_CFG);
-#endif
-#endif
+	alchemy_uart_enable(AU1000_UART3_PHYS_ADDR);
+	/* Enable DTR (MCR bit 0) = USB power up */
+	__raw_writel(1, (void __iomem *)KSEG1ADDR(AU1000_UART3_PHYS_ADDR + 0x18));
+	wmb();
 }
 
 static int __init xxs1500_init_irq(void)

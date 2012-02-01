@@ -27,8 +27,8 @@
 
 #define MDR1_MODE_MASK			0x07
 
-static volatile u8 *uart_base;
-static int uart_shift;
+volatile u8 *uart_base;
+int uart_shift;
 
 /*
  * Store the DEBUG_LL uart number into memory.
@@ -36,7 +36,13 @@ static int uart_shift;
  */
 static void set_omap_uart_info(unsigned char port)
 {
-	*(volatile u32 *)OMAP_UART_INFO = port;
+	/*
+	 * Get address of some.bss variable and round it down
+	 * a la CONFIG_AUTO_ZRELADDR.
+	 */
+	u32 ram_start = (u32)&uart_shift & 0xf8000000;
+	u32 *uart_info = (u32 *)(ram_start + OMAP_UART_INFO_OFS);
+	*uart_info = port;
 }
 
 static void putc(int c)
@@ -129,7 +135,6 @@ static inline void __arch_decomp_setup(unsigned long arch_id)
 		DEBUG_LL_OMAP1(3, sx1);
 
 		/* omap2 based boards using UART1 */
-		DEBUG_LL_OMAP2(1, omap2evm);
 		DEBUG_LL_OMAP2(1, omap_2430sdp);
 		DEBUG_LL_OMAP2(1, omap_apollon);
 		DEBUG_LL_OMAP2(1, omap_h4);
@@ -149,6 +154,7 @@ static inline void __arch_decomp_setup(unsigned long arch_id)
 		/* omap3 based boards using UART3 */
 		DEBUG_LL_OMAP3(3, cm_t35);
 		DEBUG_LL_OMAP3(3, cm_t3517);
+		DEBUG_LL_OMAP3(3, cm_t3730);
 		DEBUG_LL_OMAP3(3, craneboard);
 		DEBUG_LL_OMAP3(3, devkit8000);
 		DEBUG_LL_OMAP3(3, igep0020);

@@ -34,6 +34,7 @@
 #include <linux/io.h>
 #include <linux/list.h>
 #include <linux/module.h>
+#include <linux/of.h>
 #include <linux/platform_device.h>
 #include <linux/pm.h>
 #include <linux/rtnetlink.h>
@@ -175,6 +176,8 @@ struct spacc_aead_ctx {
 	size_t				auth_size;
 	u8				salt[AES_BLOCK_SIZE];
 };
+
+static int spacc_ablk_submit(struct spacc_req *req);
 
 static inline struct spacc_alg *to_spacc_alg(struct crypto_alg *alg)
 {
@@ -666,6 +669,24 @@ static int spacc_aead_submit(struct spacc_req *req)
 	return -EINPROGRESS;
 }
 
+static int spacc_req_submit(struct spacc_req *req);
+
+static void spacc_push(struct spacc_engine *engine)
+{
+	struct spacc_req *req;
+
+	while (!list_empty(&engine->pending) &&
+	       engine->in_flight + 1 <= engine->fifo_sz) {
+
+		++engine->in_flight;
+		req = list_first_entry(&engine->pending, struct spacc_req,
+				       list);
+		list_move_tail(&req->list, &engine->in_progress);
+
+		req->result = spacc_req_submit(req);
+	}
+}
+
 /*
  * Setup an AEAD request for processing. This will configure the engine, load
  * the context and then start the packet processing.
@@ -698,7 +719,8 @@ static int spacc_aead_setup(struct aead_request *req, u8 *giv,
 
 	err = -EINPROGRESS;
 	spin_lock_irqsave(&engine->hw_lock, flags);
-	if (unlikely(spacc_fifo_cmd_full(engine))) {
+	if (unlikely(spacc_fifo_cmd_full(engine)) ||
+	    engine->in_flight + 1 > engine->fifo_sz) {
 		if (!(req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG)) {
 			err = -EBUSY;
 			spin_unlock_irqrestore(&engine->hw_lock, flags);
@@ -706,9 +728,8 @@ static int spacc_aead_setup(struct aead_request *req, u8 *giv,
 		}
 		list_add_tail(&dev_req->list, &engine->pending);
 	} else {
-		++engine->in_flight;
-		list_add_tail(&dev_req->list, &engine->in_progress);
-		spacc_aead_submit(dev_req);
+		list_add_tail(&dev_req->list, &engine->pending);
+		spacc_push(engine);
 	}
 	spin_unlock_irqrestore(&engine->hw_lock, flags);
 
@@ -1041,7 +1062,8 @@ static int spacc_ablk_setup(struct ablkcipher_request *req, unsigned alg_type,
 	 * we either stick it on the end of a pending list if we can backlog,
 	 * or bailout with an error if not.
 	 */
-	if (unlikely(spacc_fifo_cmd_full(engine))) {
+	if (unlikely(spacc_fifo_cmd_full(engine)) ||
+	    engine->in_flight + 1 > engine->fifo_sz) {
 		if (!(req->base.flags & CRYPTO_TFM_REQ_MAY_BACKLOG)) {
 			err = -EBUSY;
 			spin_unlock_irqrestore(&engine->hw_lock, flags);
@@ -1049,9 +1071,8 @@ static int spacc_ablk_setup(struct ablkcipher_request *req, unsigned alg_type,
 		}
 		list_add_tail(&dev_req->list, &engine->pending);
 	} else {
-		++engine->in_flight;
-		list_add_tail(&dev_req->list, &engine->in_progress);
-		spacc_ablk_submit(dev_req);
+		list_add_tail(&dev_req->list, &engine->pending);
+		spacc_push(engine);
 	}
 	spin_unlock_irqrestore(&engine->hw_lock, flags);
 
@@ -1139,6 +1160,7 @@ static void spacc_process_done(struct spacc_engine *engine)
 		req = list_first_entry(&engine->in_progress, struct spacc_req,
 				       list);
 		list_move_tail(&req->list, &engine->completed);
+		--engine->in_flight;
 
 		/* POP the status register. */
 		writel(~0, engine->regs + SPA_STAT_POP_REG_OFFSET);
@@ -1208,36 +1230,21 @@ static void spacc_spacc_complete(unsigned long data)
 	struct spacc_engine *engine = (struct spacc_engine *)data;
 	struct spacc_req *req, *tmp;
 	unsigned long flags;
-	int num_removed = 0;
 	LIST_HEAD(completed);
 
 	spin_lock_irqsave(&engine->hw_lock, flags);
+
 	list_splice_init(&engine->completed, &completed);
-	spin_unlock_irqrestore(&engine->hw_lock, flags);
-
-	list_for_each_entry_safe(req, tmp, &completed, list) {
-		++num_removed;
-		req->complete(req);
-	}
-
-	/* Try and fill the engine back up again. */
-	spin_lock_irqsave(&engine->hw_lock, flags);
-
-	engine->in_flight -= num_removed;
-
-	list_for_each_entry_safe(req, tmp, &engine->pending, list) {
-		if (spacc_fifo_cmd_full(engine))
-			break;
-
-		list_move_tail(&req->list, &engine->in_progress);
-		++engine->in_flight;
-		req->result = spacc_req_submit(req);
-	}
-
+	spacc_push(engine);
 	if (engine->in_flight)
 		mod_timer(&engine->packet_timeout, jiffies + PACKET_TIMEOUT);
 
 	spin_unlock_irqrestore(&engine->hw_lock, flags);
+
+	list_for_each_entry_safe(req, tmp, &completed, list) {
+		list_del(&req->list);
+		req->complete(req);
+	}
 }
 
 #ifdef CONFIG_PM
@@ -1651,10 +1658,33 @@ static struct spacc_alg l2_engine_algs[] = {
 	},
 };
 
-static int __devinit spacc_probe(struct platform_device *pdev,
-				 unsigned max_ctxs, size_t cipher_pg_sz,
-				 size_t hash_pg_sz, size_t fifo_sz,
-				 struct spacc_alg *algs, size_t num_algs)
+#ifdef CONFIG_OF
+static const struct of_device_id spacc_of_id_table[] = {
+	{ .compatible = "picochip,spacc-ipsec" },
+	{ .compatible = "picochip,spacc-l2" },
+	{}
+};
+#else /* CONFIG_OF */
+#define spacc_of_id_table NULL
+#endif /* CONFIG_OF */
+
+static bool spacc_is_compatible(struct platform_device *pdev,
+				const char *spacc_type)
+{
+	const struct platform_device_id *platid = platform_get_device_id(pdev);
+
+	if (platid && !strcmp(platid->name, spacc_type))
+		return true;
+
+#ifdef CONFIG_OF
+	if (of_device_is_compatible(pdev->dev.of_node, spacc_type))
+		return true;
+#endif /* CONFIG_OF */
+
+	return false;
+}
+
+static int __devinit spacc_probe(struct platform_device *pdev)
 {
 	int i, err, ret = -EINVAL;
 	struct resource *mem, *irq;
@@ -1663,13 +1693,25 @@ static int __devinit spacc_probe(struct platform_device *pdev,
 	if (!engine)
 		return -ENOMEM;
 
-	engine->max_ctxs	= max_ctxs;
-	engine->cipher_pg_sz	= cipher_pg_sz;
-	engine->hash_pg_sz	= hash_pg_sz;
-	engine->fifo_sz		= fifo_sz;
-	engine->algs		= algs;
-	engine->num_algs	= num_algs;
-	engine->name		= dev_name(&pdev->dev);
+	if (spacc_is_compatible(pdev, "picochip,spacc-ipsec")) {
+		engine->max_ctxs	= SPACC_CRYPTO_IPSEC_MAX_CTXS;
+		engine->cipher_pg_sz	= SPACC_CRYPTO_IPSEC_CIPHER_PG_SZ;
+		engine->hash_pg_sz	= SPACC_CRYPTO_IPSEC_HASH_PG_SZ;
+		engine->fifo_sz		= SPACC_CRYPTO_IPSEC_FIFO_SZ;
+		engine->algs		= ipsec_engine_algs;
+		engine->num_algs	= ARRAY_SIZE(ipsec_engine_algs);
+	} else if (spacc_is_compatible(pdev, "picochip,spacc-l2")) {
+		engine->max_ctxs	= SPACC_CRYPTO_L2_MAX_CTXS;
+		engine->cipher_pg_sz	= SPACC_CRYPTO_L2_CIPHER_PG_SZ;
+		engine->hash_pg_sz	= SPACC_CRYPTO_L2_HASH_PG_SZ;
+		engine->fifo_sz		= SPACC_CRYPTO_L2_FIFO_SZ;
+		engine->algs		= l2_engine_algs;
+		engine->num_algs	= ARRAY_SIZE(l2_engine_algs);
+	} else {
+		return -EINVAL;
+	}
+
+	engine->name = dev_name(&pdev->dev);
 
 	mem = platform_get_resource(pdev, IORESOURCE_MEM, 0);
 	irq = platform_get_resource(pdev, IORESOURCE_IRQ, 0);
@@ -1705,7 +1747,7 @@ static int __devinit spacc_probe(struct platform_device *pdev,
 
 	spin_lock_init(&engine->hw_lock);
 
-	engine->clk = clk_get(&pdev->dev, NULL);
+	engine->clk = clk_get(&pdev->dev, "ref");
 	if (IS_ERR(engine->clk)) {
 		dev_info(&pdev->dev, "clk unavailable\n");
 		device_remove_file(&pdev->dev, &dev_attr_stat_irq_thresh);
@@ -1794,72 +1836,33 @@ static int __devexit spacc_remove(struct platform_device *pdev)
 	return 0;
 }
 
-static int __devinit ipsec_probe(struct platform_device *pdev)
-{
-	return spacc_probe(pdev, SPACC_CRYPTO_IPSEC_MAX_CTXS,
-			   SPACC_CRYPTO_IPSEC_CIPHER_PG_SZ,
-			   SPACC_CRYPTO_IPSEC_HASH_PG_SZ,
-			   SPACC_CRYPTO_IPSEC_FIFO_SZ, ipsec_engine_algs,
-			   ARRAY_SIZE(ipsec_engine_algs));
-}
-
-static struct platform_driver ipsec_driver = {
-	.probe		= ipsec_probe,
-	.remove		= __devexit_p(spacc_remove),
-	.driver		= {
-		.name	= "picoxcell-ipsec",
-#ifdef CONFIG_PM
-		.pm	= &spacc_pm_ops,
-#endif /* CONFIG_PM */
-	},
+static const struct platform_device_id spacc_id_table[] = {
+	{ "picochip,spacc-ipsec", },
+	{ "picochip,spacc-l2", },
 };
 
-static int __devinit l2_probe(struct platform_device *pdev)
-{
-	return spacc_probe(pdev, SPACC_CRYPTO_L2_MAX_CTXS,
-			   SPACC_CRYPTO_L2_CIPHER_PG_SZ,
-			   SPACC_CRYPTO_L2_HASH_PG_SZ, SPACC_CRYPTO_L2_FIFO_SZ,
-			   l2_engine_algs, ARRAY_SIZE(l2_engine_algs));
-}
-
-static struct platform_driver l2_driver = {
-	.probe		= l2_probe,
+static struct platform_driver spacc_driver = {
+	.probe		= spacc_probe,
 	.remove		= __devexit_p(spacc_remove),
 	.driver		= {
-		.name	= "picoxcell-l2",
+		.name	= "picochip,spacc",
 #ifdef CONFIG_PM
 		.pm	= &spacc_pm_ops,
 #endif /* CONFIG_PM */
+		.of_match_table	= spacc_of_id_table,
 	},
+	.id_table	= spacc_id_table,
 };
 
 static int __init spacc_init(void)
 {
-	int ret = platform_driver_register(&ipsec_driver);
-	if (ret) {
-		pr_err("failed to register ipsec spacc driver");
-		goto out;
-	}
-
-	ret = platform_driver_register(&l2_driver);
-	if (ret) {
-		pr_err("failed to register l2 spacc driver");
-		goto l2_failed;
-	}
-
-	return 0;
-
-l2_failed:
-	platform_driver_unregister(&ipsec_driver);
-out:
-	return ret;
+	return platform_driver_register(&spacc_driver);
 }
 module_init(spacc_init);
 
 static void __exit spacc_exit(void)
 {
-	platform_driver_unregister(&ipsec_driver);
-	platform_driver_unregister(&l2_driver);
+	platform_driver_unregister(&spacc_driver);
 }
 module_exit(spacc_exit);
 

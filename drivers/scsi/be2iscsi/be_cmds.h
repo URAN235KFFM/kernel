@@ -1,5 +1,5 @@
 /**
- * Copyright (C) 2005 - 2010 ServerEngines
+ * Copyright (C) 2005 - 2011 Emulex
  * All rights reserved.
  *
  * This program is free software; you can redistribute it and/or
@@ -8,11 +8,11 @@
  * Public License is included in this distribution in the file called COPYING.
  *
  * Contact Information:
- * linux-drivers@serverengines.com
+ * linux-drivers@emulex.com
  *
- * ServerEngines
- * 209 N. Fair Oaks Ave
- * Sunnyvale, CA 94085
+ * Emulex
+ * 3333 Susan Street
+ * Costa Mesa, CA 92626
  */
 
 #ifndef BEISCSI_CMDS_H
@@ -560,6 +560,8 @@ int be_cmd_create_default_pdu_queue(struct be_ctrl_info *ctrl,
 int be_cmd_iscsi_post_sgl_pages(struct be_ctrl_info *ctrl,
 				struct be_dma_mem *q_mem, u32 page_offset,
 				u32 num_pages);
+
+int beiscsi_cmd_reset_function(struct beiscsi_hba *phba);
 
 int be_cmd_wrbq_create(struct be_ctrl_info *ctrl, struct be_dma_mem *q_mem,
 		       struct be_queue_info *wrbq);

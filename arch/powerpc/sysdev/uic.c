@@ -41,15 +41,13 @@
 #define UIC_VR		0x7
 #define UIC_VCR		0x8
 
-#define uic_irq_to_hw(virq)	(irq_map[virq].hwirq)
-
 struct uic *primary_uic;
 
 struct uic {
 	int index;
 	int dcrbase;
 
-	spinlock_t lock;
+	raw_spinlock_t lock;
 
 	/* The remapper for this UIC */
 	struct irq_host	*irqhost;
@@ -58,55 +56,55 @@ struct uic {
 static void uic_unmask_irq(struct irq_data *d)
 {
 	struct uic *uic = irq_data_get_irq_chip_data(d);
-	unsigned int src = uic_irq_to_hw(d->irq);
+	unsigned int src = irqd_to_hwirq(d);
 	unsigned long flags;
 	u32 er, sr;
 
 	sr = 1 << (31-src);
-	spin_lock_irqsave(&uic->lock, flags);
+	raw_spin_lock_irqsave(&uic->lock, flags);
 	/* ack level-triggered interrupts here */
 	if (irqd_is_level_type(d))
 		mtdcr(uic->dcrbase + UIC_SR, sr);
 	er = mfdcr(uic->dcrbase + UIC_ER);
 	er |= sr;
 	mtdcr(uic->dcrbase + UIC_ER, er);
-	spin_unlock_irqrestore(&uic->lock, flags);
+	raw_spin_unlock_irqrestore(&uic->lock, flags);
 }
 
 static void uic_mask_irq(struct irq_data *d)
 {
 	struct uic *uic = irq_data_get_irq_chip_data(d);
-	unsigned int src = uic_irq_to_hw(d->irq);
+	unsigned int src = irqd_to_hwirq(d);
 	unsigned long flags;
 	u32 er;
 
-	spin_lock_irqsave(&uic->lock, flags);
+	raw_spin_lock_irqsave(&uic->lock, flags);
 	er = mfdcr(uic->dcrbase + UIC_ER);
 	er &= ~(1 << (31 - src));
 	mtdcr(uic->dcrbase + UIC_ER, er);
-	spin_unlock_irqrestore(&uic->lock, flags);
+	raw_spin_unlock_irqrestore(&uic->lock, flags);
 }
 
 static void uic_ack_irq(struct irq_data *d)
 {
 	struct uic *uic = irq_data_get_irq_chip_data(d);
-	unsigned int src = uic_irq_to_hw(d->irq);
+	unsigned int src = irqd_to_hwirq(d);
 	unsigned long flags;
 
-	spin_lock_irqsave(&uic->lock, flags);
+	raw_spin_lock_irqsave(&uic->lock, flags);
 	mtdcr(uic->dcrbase + UIC_SR, 1 << (31-src));
-	spin_unlock_irqrestore(&uic->lock, flags);
+	raw_spin_unlock_irqrestore(&uic->lock, flags);
 }
 
 static void uic_mask_ack_irq(struct irq_data *d)
 {
 	struct uic *uic = irq_data_get_irq_chip_data(d);
-	unsigned int src = uic_irq_to_hw(d->irq);
+	unsigned int src = irqd_to_hwirq(d);
 	unsigned long flags;
 	u32 er, sr;
 
 	sr = 1 << (31-src);
-	spin_lock_irqsave(&uic->lock, flags);
+	raw_spin_lock_irqsave(&uic->lock, flags);
 	er = mfdcr(uic->dcrbase + UIC_ER);
 	er &= ~sr;
 	mtdcr(uic->dcrbase + UIC_ER, er);
@@ -120,13 +118,13 @@ static void uic_mask_ack_irq(struct irq_data *d)
 	 */
 	if (!irqd_is_level_type(d))
 		mtdcr(uic->dcrbase + UIC_SR, sr);
-	spin_unlock_irqrestore(&uic->lock, flags);
+	raw_spin_unlock_irqrestore(&uic->lock, flags);
 }
 
 static int uic_set_irq_type(struct irq_data *d, unsigned int flow_type)
 {
 	struct uic *uic = irq_data_get_irq_chip_data(d);
-	unsigned int src = uic_irq_to_hw(d->irq);
+	unsigned int src = irqd_to_hwirq(d);
 	unsigned long flags;
 	int trigger, polarity;
 	u32 tr, pr, mask;
@@ -154,7 +152,7 @@ static int uic_set_irq_type(struct irq_data *d, unsigned int flow_type)
 
 	mask = ~(1 << (31 - src));
 
-	spin_lock_irqsave(&uic->lock, flags);
+	raw_spin_lock_irqsave(&uic->lock, flags);
 	tr = mfdcr(uic->dcrbase + UIC_TR);
 	pr = mfdcr(uic->dcrbase + UIC_PR);
 	tr = (tr & mask) | (trigger << (31-src));
@@ -163,7 +161,7 @@ static int uic_set_irq_type(struct irq_data *d, unsigned int flow_type)
 	mtdcr(uic->dcrbase + UIC_PR, pr);
 	mtdcr(uic->dcrbase + UIC_TR, tr);
 
-	spin_unlock_irqrestore(&uic->lock, flags);
+	raw_spin_unlock_irqrestore(&uic->lock, flags);
 
 	return 0;
 }
@@ -256,7 +254,7 @@ static struct uic * __init uic_init_one(struct device_node *node)
 	if (! uic)
 		return NULL; /* FIXME: panic? */
 
-	spin_lock_init(&uic->lock);
+	raw_spin_lock_init(&uic->lock);
 	indexp = of_get_property(node, "cell-index", &len);
 	if (!indexp || (len != sizeof(u32))) {
 		printk(KERN_ERR "uic: Device node %s has missing or invalid "

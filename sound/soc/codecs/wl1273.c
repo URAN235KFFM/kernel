@@ -23,6 +23,7 @@
 
 #include <linux/mfd/wl1273-core.h>
 #include <linux/slab.h>
+#include <linux/module.h>
 #include <sound/pcm.h>
 #include <sound/pcm_params.h>
 #include <sound/soc.h>
@@ -441,8 +442,7 @@ EXPORT_SYMBOL_GPL(wl1273_get_format);
 
 static int wl1273_probe(struct snd_soc_codec *codec)
 {
-	struct wl1273_core **core =
-			mfd_get_data(to_platform_device(codec->dev));
+	struct wl1273_core **core = codec->dev->platform_data;
 	struct wl1273_priv *wl1273;
 	int r;
 
@@ -463,7 +463,6 @@ static int wl1273_probe(struct snd_soc_codec *codec)
 	wl1273->core = *core;
 
 	snd_soc_codec_set_drvdata(codec, wl1273);
-	mutex_init(&codec->mutex);
 
 	r = snd_soc_add_controls(codec, wl1273_controls,
 				 ARRAY_SIZE(wl1273_controls));

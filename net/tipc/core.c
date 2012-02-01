@@ -34,6 +34,8 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <linux/module.h>
+
 #include "core.h"
 #include "ref.h"
 #include "name_table.h"
@@ -179,8 +181,7 @@ static int __init tipc_init(void)
 	if (tipc_log_resize(CONFIG_TIPC_LOG) != 0)
 		warn("Unable to create log buffer\n");
 
-	info("Activated (version " TIPC_MOD_VER
-	     " compiled " __DATE__ " " __TIME__ ")\n");
+	info("Activated (version " TIPC_MOD_VER ")\n");
 
 	tipc_own_addr = 0;
 	tipc_remote_management = 1;

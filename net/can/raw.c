@@ -37,8 +37,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH
  * DAMAGE.
  *
- * Send feedback to <socketcan-users@lists.berlios.de>
- *
  */
 
 #include <linux/module.h>
@@ -774,7 +772,7 @@ static struct proto raw_proto __read_mostly = {
 	.init       = raw_init,
 };
 
-static struct can_proto raw_can_proto __read_mostly = {
+static const struct can_proto raw_can_proto = {
 	.type       = SOCK_RAW,
 	.protocol   = CAN_RAW,
 	.ops        = &raw_ops,

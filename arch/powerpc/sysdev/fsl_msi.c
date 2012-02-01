@@ -30,7 +30,7 @@ LIST_HEAD(msi_head);
 
 struct fsl_msi_feature {
 	u32 fsl_pic_ip;
-	u32 msiir_offset;
+	u32 msiir_offset; /* Offset of MSIIR, relative to start of MSIR bank */
 };
 
 struct fsl_msi_cascade_data {
@@ -110,7 +110,7 @@ static void fsl_teardown_msi_irqs(struct pci_dev *pdev)
 	list_for_each_entry(entry, &pdev->msi_list, list) {
 		if (entry->irq == NO_IRQ)
 			continue;
-		msi_data = irq_get_handler_data(entry->irq);
+		msi_data = irq_get_chip_data(entry->irq);
 		irq_set_msi_desc(entry->irq, NULL);
 		msi_bitmap_free_hwirqs(&msi_data->bitmap,
 				       virq_to_hw(entry->irq), 1);
@@ -126,10 +126,19 @@ static void fsl_compose_msi_msg(struct pci_dev *pdev, int hwirq,
 {
 	struct fsl_msi *msi_data = fsl_msi_data;
 	struct pci_controller *hose = pci_bus_to_host(pdev->bus);
-	u64 base = fsl_pci_immrbar_base(hose);
+	u64 address; /* Physical address of the MSIIR */
+	int len;
+	const u64 *reg;
 
-	msg->address_lo = msi_data->msi_addr_lo + lower_32_bits(base);
-	msg->address_hi = msi_data->msi_addr_hi + upper_32_bits(base);
+	/* If the msi-address-64 property exists, then use it */
+	reg = of_get_property(hose->dn, "msi-address-64", &len);
+	if (reg && (len == sizeof(u64)))
+		address = be64_to_cpup(reg);
+	else
+		address = fsl_pci_immrbar_base(hose) + msi_data->msiir_offset;
+
+	msg->address_lo = lower_32_bits(address);
+	msg->address_hi = upper_32_bits(address);
 
 	msg->data = hwirq;
 
@@ -168,7 +177,7 @@ static int fsl_setup_msi_irqs(struct pci_dev *pdev, int nvec, int type)
 			rc = -ENOSPC;
 			goto out_free;
 		}
-		irq_set_handler_data(virq, msi_data);
+		/* chip_data is msi_data via host->hostdata in host->map() */
 		irq_set_msi_desc(virq, entry);
 
 		fsl_compose_msi_msg(pdev, hwirq, &msg, msi_data);
@@ -193,7 +202,7 @@ static void fsl_msi_cascade(unsigned int irq, struct irq_desc *desc)
 	u32 have_shift = 0;
 	struct fsl_msi_cascade_data *cascade_data;
 
-	cascade_data = (struct fsl_msi_cascade_data *)irq_get_handler_data(irq);
+	cascade_data = irq_get_handler_data(irq);
 	msi_data = cascade_data->msi_data;
 
 	raw_spin_lock(&desc->lock);
@@ -253,7 +262,7 @@ unlock:
 
 static int fsl_of_msi_remove(struct platform_device *ofdev)
 {
-	struct fsl_msi *msi = ofdev->dev.platform_data;
+	struct fsl_msi *msi = platform_get_drvdata(ofdev);
 	int virq, i;
 	struct fsl_msi_cascade_data *cascade_data;
 
@@ -296,7 +305,7 @@ static int __devinit fsl_msi_setup_hwirq(struct fsl_msi *msi,
 	}
 
 	msi->msi_virqs[irq_index] = virt_msir;
-	cascade_data->index = offset + irq_index;
+	cascade_data->index = offset;
 	cascade_data->msi_data = msi;
 	irq_set_handler_data(virt_msir, cascade_data);
 	irq_set_chained_handler(virt_msir, fsl_msi_cascade);
@@ -330,7 +339,7 @@ static int __devinit fsl_of_msi_probe(struct platform_device *dev)
 		dev_err(&dev->dev, "No memory for MSI structure\n");
 		return -ENOMEM;
 	}
-	dev->dev.platform_data = msi;
+	platform_set_drvdata(dev, msi);
 
 	msi->irqhost = irq_alloc_host(dev->dev.of_node, IRQ_HOST_MAP_LINEAR,
 				      NR_MSI_IRQS, &fsl_msi_host_ops, 0);
@@ -349,7 +358,7 @@ static int __devinit fsl_of_msi_probe(struct platform_device *dev)
 		goto error_out;
 	}
 
-	msi->msi_regs = ioremap(res.start, res.end - res.start + 1);
+	msi->msi_regs = ioremap(res.start, resource_size(&res));
 	if (!msi->msi_regs) {
 		dev_err(&dev->dev, "ioremap problem failed\n");
 		goto error_out;
@@ -359,8 +368,7 @@ static int __devinit fsl_of_msi_probe(struct platform_device *dev)
 
 	msi->irqhost->host_data = msi;
 
-	msi->msi_addr_hi = 0x0;
-	msi->msi_addr_lo = features->msiir_offset + (res.start & 0xfffff);
+	msi->msiir_offset = features->msiir_offset + (res.start & 0xfffff);
 
 	rc = fsl_msi_init_allocator(msi);
 	if (rc) {
@@ -376,8 +384,10 @@ static int __devinit fsl_of_msi_probe(struct platform_device *dev)
 		goto error_out;
 	}
 
-	if (!p)
+	if (!p) {
 		p = all_avail;
+		len = sizeof(all_avail);
+	}
 
 	for (irq_index = 0, i = 0; i < len / (2 * sizeof(u32)); i++) {
 		if (p[i * 2] % IRQS_PER_MSI_REG ||
@@ -393,7 +403,7 @@ static int __devinit fsl_of_msi_probe(struct platform_device *dev)
 		count = p[i * 2 + 1] / IRQS_PER_MSI_REG;
 
 		for (j = 0; j < count; j++, irq_index++) {
-			err = fsl_msi_setup_hwirq(msi, dev, offset, irq_index);
+			err = fsl_msi_setup_hwirq(msi, dev, offset + j, irq_index);
 			if (err)
 				goto error_out;
 		}
